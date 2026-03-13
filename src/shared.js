@@ -1,11 +1,11 @@
 export const C = {
-  blue: "#388bff", gold: "#d4a03c", green: "#4ade80", red: "#ff6b6b",
-  bg: "#080c14", border: "rgba(255,255,255,0.07)", text: "#e8edf4",
-  muted: "#6a7890", faint: "#4a5568",
+  blue: "#4f8ef7", gold: "#e8b84b", green: "#52d68a", red: "#f76f6f",
+  bg: "#07090f", card: "#0d1117", border: "rgba(255,255,255,0.06)",
+  text: "#edf0f7", muted: "#5a6880", faint: "#2e3a4a",
 };
 
 export const statusColor = {
-  Abierto: "#4ade80", "En curso": "#388bff", Finalizado: "#d4a03c", Cerrado: "#94a3b8",
+  Abierto: "#52d68a", "En curso": "#4f8ef7", Finalizado: "#e8b84b", Cerrado: "#6b7a90",
 };
 
 export function getRoundName(totalRounds, roundIdx) {
@@ -16,18 +16,23 @@ export function getRoundName(totalRounds, roundIdx) {
 
 export function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
 
-export function buildGroups(teams, groupCount) {
+export function buildGroups(teams, groupCount, legs = 1) {
   const shuffled = shuffle(teams);
   const groups = Array.from({ length: groupCount }, (_, i) => ({
-    name: String.fromCharCode(65 + i), teams: [], matches: [], standings: [],
+    name: String.fromCharCode(65 + i), teams: [], matches: [], standings: [], legs,
   }));
   shuffled.forEach((t, i) => groups[i % groupCount].teams.push(t));
   groups.forEach((g) => {
     g.standings = g.teams.map((t) => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 }));
     const matches = [];
-    for (let a = 0; a < g.teams.length; a++)
-      for (let b = a + 1; b < g.teams.length; b++)
-        matches.push({ teamA: g.teams[a], teamB: g.teams[b], scoreA: null, scoreB: null, played: false });
+    for (let a = 0; a < g.teams.length; a++) {
+      for (let b = a + 1; b < g.teams.length; b++) {
+        matches.push({ teamA: g.teams[a], teamB: g.teams[b], scoreA: null, scoreB: null, played: false, leg: 1 });
+        if (legs === 2) {
+          matches.push({ teamA: g.teams[b], teamB: g.teams[a], scoreA: null, scoreB: null, played: false, leg: 2 });
+        }
+      }
+    }
     g.matches = matches;
   });
   return groups;
@@ -83,51 +88,105 @@ export function buildEliminationRound(teams) {
   return matches;
 }
 
-// Team logo component - shows shield or initials fallback
 export function TeamLogo({ name, logoUrl, size = 28 }) {
+  if (!name) return null;
   if (logoUrl) {
     return (
-      <img
-        src={logoUrl}
-        alt={name}
-        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.15)", flexShrink: 0, background: "#1a2030" }}
-        onError={e => { e.target.style.display = "none"; }}
-      />
+      <img src={logoUrl} alt={name}
+        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030" }}
+        onError={e => { e.target.style.display = "none"; }} />
     );
   }
+  const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%", flexShrink: 0,
-      background: `hsl(${[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 40%, 28%)`,
-      border: "1px solid rgba(255,255,255,0.12)",
+      background: `hsl(${hue},45%,28%)`, border: "1px solid rgba(255,255,255,0.1)",
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.4, fontWeight: 700, color: "#e8edf4",
+      fontSize: Math.max(size * 0.38, 10), fontWeight: 700, color: "#e8edf4",
+      fontFamily: "'Georgia',serif",
     }}>
       {name.charAt(0).toUpperCase()}
     </div>
   );
 }
 
+// ── Shared UI tokens ──────────────────────────────────────────────
 export const S = {
-  wrap: { minHeight: "100vh", background: "#080c14", fontFamily: "'Georgia','Times New Roman',serif", color: "#e8edf4" },
+  wrap: { minHeight: "100vh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
   header: {
-    borderBottom: "1px solid rgba(56,139,255,0.15)", padding: "0 clamp(16px,4vw,32px)",
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    height: 60, background: "rgba(8,12,20,0.95)", backdropFilter: "blur(12px)",
+    padding: "0 clamp(16px,4vw,32px)", display: "flex", alignItems: "center",
+    justifyContent: "space-between", height: 58,
+    background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)",
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
     position: "sticky", top: 0, zIndex: 100,
   },
-  main: { maxWidth: 1040, margin: "0 auto", padding: "clamp(20px,4vw,40px) clamp(16px,4vw,32px)" },
-  card: { border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)", padding: "clamp(16px,3vw,24px)", marginBottom: 12 },
-  label: { fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#6a7890", display: "block", marginBottom: 8 },
-  input: { width: "100%", padding: "10px 14px", fontSize: 14, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#e8edf4", boxSizing: "border-box", fontFamily: "'Georgia',serif" },
-  textarea: { width: "100%", padding: "10px 14px", fontSize: 14, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#e8edf4", boxSizing: "border-box", fontFamily: "'Georgia',serif", minHeight: 100, resize: "vertical" },
-  select: { width: "100%", padding: "10px 14px", fontSize: 14, background: "#0e1420", border: "1px solid rgba(255,255,255,0.1)", color: "#e8edf4", fontFamily: "'Georgia',serif" },
-  btn: (color = "#388bff") => ({ padding: "10px 20px", background: color, border: "none", color: color === "#d4a03c" ? "#0a0a0f" : "#fff", cursor: "pointer", letterSpacing: 2, textTransform: "uppercase", fontSize: 11, fontWeight: 700, fontFamily: "'Georgia',serif", whiteSpace: "nowrap" }),
-  btnSm: { padding: "5px 12px", background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#6a7890", cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'Georgia',serif", whiteSpace: "nowrap" },
-  btnDanger: { padding: "5px 12px", background: "transparent", border: "1px solid rgba(255,100,100,0.3)", color: "#ff6b6b", cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'Georgia',serif" },
-  tag: (color) => ({ fontSize: 9, letterSpacing: 2, padding: "3px 8px", background: `${color}22`, color, border: `1px solid ${color}44`, textTransform: "uppercase" }),
-  tab: (active, color = "#388bff") => ({ padding: "10px clamp(12px,2vw,20px)", background: "none", border: "none", borderBottom: active ? `2px solid ${color}` : "2px solid transparent", color: active ? color : "#6a7890", cursor: "pointer", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'Georgia',serif", marginBottom: -1, whiteSpace: "nowrap" }),
-  th: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "#6a7890", padding: "8px 10px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.07)" },
-  td: { padding: "8px 10px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.04)" },
-  numInput: { width: 44, padding: "5px 6px", textAlign: "center", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#e8edf4", fontFamily: "'Georgia',serif", fontSize: 13 },
+  main: { maxWidth: 1080, margin: "0 auto", padding: "clamp(24px,4vw,44px) clamp(16px,4vw,32px)" },
+  card: {
+    border: "1px solid rgba(255,255,255,0.06)", background: C.card,
+    borderRadius: 10, padding: "clamp(16px,3vw,24px)", marginBottom: 12,
+  },
+  cardHover: { cursor: "pointer", transition: "border-color .15s,background .15s" },
+  label: { fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 8 },
+  input: {
+    width: "100%", padding: "11px 14px", fontSize: 14, borderRadius: 7,
+    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)",
+    color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif",
+    transition: "border-color .15s",
+  },
+  textarea: {
+    width: "100%", padding: "11px 14px", fontSize: 14, borderRadius: 7,
+    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)",
+    color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif",
+    minHeight: 100, resize: "vertical",
+  },
+  select: {
+    width: "100%", padding: "11px 14px", fontSize: 14, borderRadius: 7,
+    background: "#0d1117", border: "1px solid rgba(255,255,255,0.09)",
+    color: C.text, fontFamily: "'Georgia',serif",
+  },
+  btn: (color = "#4f8ef7") => ({
+    padding: "10px 22px", background: color, border: "none", borderRadius: 7,
+    color: color === "#e8b84b" ? "#07090f" : "#fff",
+    cursor: "pointer", letterSpacing: 1.5, textTransform: "uppercase",
+    fontSize: 11, fontWeight: 700, fontFamily: "'Georgia',serif",
+    whiteSpace: "nowrap", transition: "opacity .15s, transform .1s",
+  }),
+  btnSm: {
+    padding: "6px 14px", background: "transparent", borderRadius: 6,
+    border: "1px solid rgba(255,255,255,0.13)", color: C.muted,
+    cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+    fontFamily: "'Georgia',serif", whiteSpace: "nowrap",
+  },
+  btnDanger: {
+    padding: "6px 14px", background: "transparent", borderRadius: 6,
+    border: "1px solid rgba(247,111,111,0.3)", color: "#f76f6f",
+    cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+    fontFamily: "'Georgia',serif",
+  },
+  tag: (color) => ({
+    fontSize: 9, letterSpacing: 2, padding: "3px 9px", borderRadius: 20,
+    background: `${color}1a`, color, border: `1px solid ${color}40`,
+    textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap",
+  }),
+  tab: (active, color = "#4f8ef7") => ({
+    padding: "12px clamp(12px,2vw,22px)", background: "none", border: "none",
+    borderBottom: active ? `2px solid ${color}` : "2px solid transparent",
+    color: active ? color : C.muted, cursor: "pointer",
+    fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
+    fontFamily: "'Georgia',serif", marginBottom: -1, whiteSpace: "nowrap",
+    transition: "color .15s",
+  }),
+  th: {
+    fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: C.muted,
+    padding: "10px 12px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)",
+  },
+  td: { padding: "10px 12px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
+  numInput: {
+    width: 46, padding: "6px 4px", textAlign: "center", borderRadius: 6,
+    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+    color: C.text, fontFamily: "'Georgia',serif", fontSize: 13,
+  },
+  divider: { height: 1, background: "rgba(255,255,255,0.05)", margin: "20px 0" },
+  sectionTitle: { fontSize: 10, letterSpacing: 4, textTransform: "uppercase", color: C.blue, marginBottom: 16 },
 };
