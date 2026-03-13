@@ -3,19 +3,27 @@ import { db, storage } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "../AuthContext";
-import { C, S, statusColor, getRoundName, TeamLogo } from "../shared";
+import { C, S, statusColor, getRoundName, TeamLogo, BottomNav } from "../shared.jsx";
 
 const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
 
 const NORMATIVA = [
-  { titulo: "1. Participación", texto: "Todos los equipos deben estar registrados y haber recibido confirmación de inscripción antes del inicio del torneo." },
-  { titulo: "2. Formato de juego", texto: "Los partidos se jugarán en FIFA Clubes Pro con la configuración oficial." },
+  { titulo: "1. Participación", texto: "Todos los equipos deben estar registrados y confirmados antes del inicio." },
+  { titulo: "2. Formato", texto: "Los partidos se juegan en FIFA Clubes Pro con la configuración oficial." },
   { titulo: "3. Puntualidad", texto: "10 minutos de margen. El incumplimiento puede suponer derrota por incomparecencia (0-3)." },
-  { titulo: "4. Conducta", texto: "Comportamiento deportivo y respetuoso en todo momento. Las infracciones pueden suponer expulsión." },
-  { titulo: "5. Resultados", texto: "Deben ser reportados por ambos equipos. En caso de discrepancia, la organización decide." },
-  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), diferencia de goles y goles a favor." },
+  { titulo: "4. Conducta", texto: "Comportamiento deportivo y respetuoso. Las infracciones pueden suponer expulsión." },
+  { titulo: "5. Resultados", texto: "Reportados por ambos equipos. En caso de discrepancia, decide la organización." },
+  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), DG y GF." },
   { titulo: "7. Eliminatoria", texto: "No se permiten empates. En caso de igualdad se juegan penaltis." },
   { titulo: "8. Modificaciones", texto: "La organización puede modificar el formato en casos excepcionales." },
+];
+
+const TABS = [
+  { id: "torneos", icon: "🎮", label: "Torneos" },
+  { id: "noticias", icon: "📰", label: "Noticias" },
+  { id: "palmares", icon: "🏆", label: "Palmarés" },
+  { id: "mis", icon: "👤", label: "Mis inscr." },
+  { id: "normativa", icon: "📋", label: "Normas" },
 ];
 
 export default function UserDashboard({ onLogout }) {
@@ -30,11 +38,10 @@ export default function UserDashboard({ onLogout }) {
   const [showModal, setShowModal] = useState(false);
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [notif, setNotif] = useState(null);
-  const [normativaOpen, setNormativaOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [inscForm, setInscForm] = useState({ teamName: "", managerId: "", phone: "", twitter: "", logoFile: null, logoPreview: null });
 
-  function showNotif(msg) { setNotif(msg); setTimeout(() => setNotif(null), 2800); }
+  function showNotif(msg) { setNotif(msg); setTimeout(() => setNotif(null), 3000); }
 
   useEffect(() => {
     const u1 = onSnapshot(query(collection(db, "tournaments"), orderBy("createdAt", "desc")), snap => setTournaments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -62,7 +69,7 @@ export default function UserDashboard({ onLogout }) {
     if (!inscForm.teamName.trim()) return showNotif("Escribe el nombre de tu equipo");
     if (!inscForm.managerId.trim()) return showNotif("Introduce el ID Manager");
     if (!inscForm.phone.trim()) return showNotif("Introduce un teléfono de contacto");
-    if (myInscriptions.find(i => i.tournamentId === selectedTournament.id)) return showNotif("Ya estás inscrito en este torneo");
+    if (myInscriptions.find(i => i.tournamentId === selectedTournament.id)) return showNotif("Ya estás inscrito");
     setUploading(true);
     let logoUrl = null;
     try {
@@ -80,125 +87,124 @@ export default function UserDashboard({ onLogout }) {
       });
       setInscForm({ teamName: "", managerId: "", phone: "", twitter: "", logoFile: null, logoPreview: null });
       setShowModal(false);
-      showNotif("Solicitud enviada ✓ — pendiente de aprobación");
+      showNotif("Solicitud enviada ✓ Pendiente de aprobación");
     } catch (e) { showNotif("Error al enviar. Inténtalo de nuevo."); }
     setUploading(false);
   }
 
-  function TRow({ name, size = 22, bold = false }) {
-    return <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><TeamLogo name={name} logoUrl={logoMap[name]} size={size} /><span style={{ fontWeight: bold ? 700 : 400 }}>{name}</span></span>;
+  function TRow({ name, size = 22 }) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+        <TeamLogo name={name} logoUrl={logoMap[name]} size={size} />
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+      </span>
+    );
+  }
+
+  function MatchRow({ m, myTeam }) {
+    const isMyA = m.teamA === myTeam, isMyB = m.teamB === myTeam;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontWeight: isMyA ? 700 : 400, color: isMyA ? C.gold : C.text }}>
+          <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={22} />
+          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
+        </div>
+        <div style={{ flexShrink: 0, minWidth: 50, textAlign: "center" }}>
+          {(m.played || m.winner)
+            ? <span style={{ fontWeight: 700, fontSize: 15, color: C.gold, letterSpacing: 2 }}>{m.scoreA}–{m.scoreB}</span>
+            : <span style={{ fontSize: 11, color: C.faint }}>vs</span>}
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end", minWidth: 0, fontWeight: isMyB ? 700 : 400, color: isMyB ? C.gold : C.text }}>
+          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span>
+          <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={22} />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div style={S.wrap}>
-      {notif && <div style={{ position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)", background: C.gold, color: "#07090f", padding: "11px 28px", zIndex: 1000, letterSpacing: 1, fontSize: 12, fontFamily: "'Georgia',serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxWidth: "90vw", textAlign: "center", borderRadius: 8 }}>{notif}</div>}
+      {notif && (
+        <div style={{ position: "fixed", top: 16, left: 16, right: 16, background: C.gold, color: "#07090f", padding: "13px 16px", zIndex: 1000, fontSize: 13, fontFamily: "'Georgia',serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", borderRadius: 10, textAlign: "center", fontWeight: 600 }}>{notif}</div>
+      )}
 
-      {/* Inscription Modal */}
+      {/* Inscription Modal - full screen on mobile */}
       {showModal && selectedTournament && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }}>
-          <div style={{ ...S.card, maxWidth: 480, width: "100%", margin: "auto", padding: "clamp(22px,5vw,36px)" }}>
-            <h3 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700 }}>Inscribirse</h3>
-            <p style={{ margin: "0 0 24px", color: C.muted, fontSize: 13 }}>{selectedTournament.name}</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Logo */}
-              <div>
-                <label style={S.label}>Escudo del equipo</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                  {inscForm.logoPreview
-                    ? <img src={inscForm.logoPreview} alt="preview" style={{ width: 58, height: 58, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(232,184,75,0.4)" }} />
-                    : <div style={{ width: 58, height: 58, borderRadius: "50%", border: "2px dashed rgba(232,184,75,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, background: "rgba(232,184,75,0.04)" }}>🛡</div>
-                  }
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <label style={{ cursor: "pointer" }}>
-                      <input type="file" accept="image/*" onChange={handleLogoChange} style={{ display: "none" }} />
-                      <span style={{ ...S.btnSm, display: "inline-block" }}>Subir escudo</span>
-                    </label>
-                    {inscForm.logoPreview && <button style={S.btnSm} onClick={() => setInscForm(p => ({ ...p, logoFile: null, logoPreview: null }))}>Quitar</button>}
-                  </div>
+        <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 300, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+          <div style={{ ...S.topBar, position: "relative", flexShrink: 0 }}>
+            <button onClick={() => setShowModal(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, letterSpacing: 1, padding: 0 }}>← Cancelar</button>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Inscribirse</span>
+            <div style={{ width: 70 }} />
+          </div>
+          <div style={{ padding: "24px 16px 40px", flex: 1 }}>
+            <p style={{ margin: "0 0 24px", color: C.muted, fontSize: 14 }}>{selectedTournament.name}</p>
+
+            {/* Logo */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={S.label}>Escudo del equipo</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                {inscForm.logoPreview
+                  ? <img src={inscForm.logoPreview} alt="preview" style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(232,184,75,0.5)" }} />
+                  : <div style={{ width: 64, height: 64, borderRadius: "50%", border: "2px dashed rgba(232,184,75,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, background: "rgba(232,184,75,0.04)", flexShrink: 0 }}>🛡</div>
+                }
+                <div>
+                  <label>
+                    <input type="file" accept="image/*" onChange={handleLogoChange} style={{ display: "none" }} />
+                    <span style={{ ...S.btnSm, display: "inline-block", marginBottom: 8 }}>Subir escudo</span>
+                  </label>
+                  <p style={{ margin: 0, fontSize: 11, color: C.faint }}>PNG o JPG · máx 2MB</p>
                 </div>
-                <p style={{ margin: "7px 0 0", fontSize: 10, color: C.faint }}>PNG o JPG · máx. 2 MB</p>
               </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div><label style={S.label}>Nombre del equipo *</label><input style={S.input} placeholder="Ej: Los Campeones FC" value={inscForm.teamName} onChange={e => setInscForm(p => ({ ...p, teamName: e.target.value }))} /></div>
               <div><label style={S.label}>ID Manager *</label><input style={S.input} placeholder="Tu ID de FIFA" value={inscForm.managerId} onChange={e => setInscForm(p => ({ ...p, managerId: e.target.value }))} /></div>
               <div><label style={S.label}>Teléfono de contacto *</label><input style={S.input} type="tel" placeholder="+34 600 000 000" value={inscForm.phone} onChange={e => setInscForm(p => ({ ...p, phone: e.target.value }))} /></div>
               <div><label style={S.label}>Cuenta de X (opcional)</label><input style={S.input} placeholder="@tunombre" value={inscForm.twitter} onChange={e => setInscForm(p => ({ ...p, twitter: e.target.value }))} /></div>
-            </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
-              <button style={{ ...S.btn(C.gold), color: "#07090f", opacity: uploading ? 0.6 : 1 }} onClick={inscribirse} disabled={uploading}>
+              <button style={{ ...S.btn(C.gold), opacity: uploading ? 0.6 : 1, marginTop: 8 }} onClick={inscribirse} disabled={uploading}>
                 {uploading ? "Enviando..." : "Enviar solicitud →"}
               </button>
-              <button style={S.btnSm} onClick={() => { setShowModal(false); setInscForm({ teamName: "", managerId: "", phone: "", twitter: "", logoFile: null, logoPreview: null }); }}>Cancelar</button>
             </div>
           </div>
         </div>
       )}
 
-      <style>{`input:focus,select:focus{outline:none;border-color:#e8b84b!important;box-shadow:0 0 0 3px rgba(232,184,75,0.1);}input::placeholder{color:rgba(200,212,228,0.18)!important;}table{border-collapse:collapse;width:100%;}*{box-sizing:border-box;}.hover-card:hover{border-color:rgba(232,184,75,0.25)!important;}.btn-h:hover{opacity:0.85;transform:translateY(-1px);}`}</style>
+      <style>{`*{box-sizing:border-box;}input:focus,select:focus,textarea:focus{outline:none;border-color:#e8b84b!important;}input::placeholder,textarea::placeholder{color:rgba(200,212,228,0.2)!important;}table{border-collapse:collapse;width:100%;}body{overscroll-behavior-y:contain;}`}</style>
 
-      {/* Normativa */}
-      <div style={{ background: "rgba(232,184,75,0.04)", borderBottom: "1px solid rgba(232,184,75,0.12)" }}>
-        <div style={{ maxWidth: 1080, margin: "0 auto", padding: "0 clamp(16px,4vw,32px)" }}>
-          <button onClick={() => setNormativaOpen(p => !p)} style={{ width: "100%", background: "none", border: "none", color: C.text, cursor: "pointer", padding: "12px 0", display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: "'Georgia',serif" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}><span>📋</span><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>Normativa del torneo</span></span>
-            <span style={{ fontSize: 10, color: C.muted, letterSpacing: 2, textTransform: "uppercase" }}>{normativaOpen ? "Ocultar ▲" : "Ver ▼"}</span>
-          </button>
-          {normativaOpen && (
-            <div style={{ paddingBottom: 20 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,280px),1fr))", gap: 12 }}>
-                {NORMATIVA.map((n, i) => (
-                  <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(232,184,75,0.1)", borderRadius: 8, padding: "13px 15px" }}>
-                    <p style={{ margin: "0 0 5px", fontWeight: 700, fontSize: 12, color: C.gold }}>{n.titulo}</p>
-                    <p style={{ margin: 0, fontSize: 12, color: "#7a8aa4", lineHeight: 1.6 }}>{n.texto}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <header style={{ ...S.header, borderBottomColor: "rgba(232,184,75,0.12)" }}>
+      <header style={S.topBar}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 30, height: 30, background: "linear-gradient(135deg,#e8b84b,#c9952a)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#07090f" }}>⚔</div>
-          <span style={{ fontSize: "clamp(12px,3vw,16px)", fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.gold }}>TournamentOS</span>
+          <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.gold }}>TournamentOS</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 11, color: C.muted, maxWidth: "25vw", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile?.name || user?.email}</span>
-          <button className="btn-h" style={{ ...S.btnSm, transition: "opacity .15s" }} onClick={onLogout}>Salir</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 11, color: C.muted, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile?.name || user?.email}</span>
+          <button style={S.btnSm} onClick={onLogout}>Salir</button>
         </div>
       </header>
 
       <main style={S.main}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, marginBottom: 26, overflowX: "auto" }}>
-          {["torneos", "noticias", "palmares", "mis-inscripciones"].map(t => (
-            <button key={t} style={{ ...S.tab(tab === t, C.gold) }} onClick={() => setTab(t)}>
-              {t === "torneos" ? "Torneos" : t === "noticias" ? "Noticias" : t === "palmares" ? "🏆 Palmarés" : "Mis inscripciones"}
-            </button>
-          ))}
-        </div>
 
         {/* TORNEOS */}
         {tab === "torneos" && (
           <>
-            <h1 style={{ fontSize: "clamp(18px,4vw,26px)", fontWeight: 700, margin: "0 0 20px" }}>Torneos · FIFA Clubes Pro</h1>
-            {tournaments.length === 0 ? (
-              <div style={{ border: "1px dashed rgba(255,255,255,0.07)", borderRadius: 10, padding: 48, textAlign: "center", color: C.faint }}>No hay torneos disponibles.</div>
-            ) : tournaments.map(t => {
-              const myInsc = myInscriptions.find(i => i.tournamentId === t.id);
-              const isExpanded = expandedTId === t.id;
-              const hasGroups = t.groups?.length > 0;
-              const hasElim = t.eliminationRounds?.length > 0;
-              return (
-                <div key={t.id} className="hover-card" style={{ ...S.card, transition: "border-color .15s" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: 12 }}>
-                    <div style={{ display: "flex", gap: 14, alignItems: "start", flex: 1 }}>
+            <p style={S.pageTitle}>Torneos</p>
+            <p style={S.pageSubtitle}>FIFA Clubes Pro</p>
+            {tournaments.length === 0
+              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay torneos disponibles.</div>
+              : tournaments.map(t => {
+                const myInsc = myInscriptions.find(i => i.tournamentId === t.id);
+                const isExpanded = expandedTId === t.id;
+                const hasGroups = t.groups?.length > 0;
+                const hasElim = t.eliminationRounds?.length > 0;
+                return (
+                  <div key={t.id} style={S.card}>
+                    <div style={{ display: "flex", alignItems: "start", gap: 12, marginBottom: 12 }}>
                       <div style={{ width: 44, height: 44, background: "rgba(232,184,75,0.08)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎮</div>
-                      <div>
-                        <h3 style={{ margin: "0 0 5px", fontSize: "clamp(14px,3vw,17px)", fontWeight: 700 }}>{t.name}</h3>
-                        <p style={{ margin: "0 0 8px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "Doble vuelta" : "Una vuelta"} · {t.teams?.length || 0} equipos</p>
-                        {t.description && <p style={{ margin: "0 0 8px", fontSize: 13, color: "#7a8aa4" }}>{t.description}</p>}
-                        {t.winner && <p style={{ margin: "0 0 8px", color: C.gold, fontSize: 13 }}>🏆 <TRow name={t.winner} size={20} bold /></p>}
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
+                        <p style={{ margin: "0 0 6px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
                           {myInsc && <span style={S.tag(myInsc.status === "aprobada" ? C.green : myInsc.status === "rechazada" ? C.red : C.gold)}>
                             {myInsc.status === "aprobada" ? "✓ Inscrito" : myInsc.status === "rechazada" ? "Rechazado" : "⏳ Pendiente"}
@@ -206,154 +212,138 @@ export default function UserDashboard({ onLogout }) {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
+                    <div style={{ display: "flex", gap: 8 }}>
                       {!myInsc && t.status === "Abierto" && (
-                        <button className="btn-h" style={{ ...S.btn(C.gold), color: "#07090f", padding: "8px 14px", fontSize: 10, transition: "opacity .15s, transform .1s" }} onClick={() => { setSelectedTournament(t); setShowModal(true); }}>Inscribirse</button>
+                        <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={() => { setSelectedTournament(t); setShowModal(true); }}>Inscribirse</button>
                       )}
                       {(hasGroups || hasElim) && (
-                        <button style={S.btnSm} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Ver ▼"}</button>
+                        <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Ver ▼"}</button>
                       )}
                     </div>
-                  </div>
 
-                  {isExpanded && (
-                    <div style={{ marginTop: 22, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 22 }}>
-                      {hasGroups && (
-                        <div style={{ marginBottom: 22 }}>
-                          <p style={S.sectionTitle}>Clasificación de grupos</p>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,260px),1fr))", gap: 18 }}>
-                            {t.groups.map((g, gi) => (
-                              <div key={gi}>
-                                <p style={{ ...S.label, color: C.gold, marginBottom: 8 }}>Grupo {g.name}</p>
-                                <div style={{ overflowX: "auto" }}>
-                                  <table style={{ minWidth: 220 }}>
-                                    <thead><tr>{["#", "Equipo", "PJ", "PTS", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                                    <tbody>
-                                      {g.standings.map((s, si) => (
-                                        <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.05)" : "transparent" }}>
-                                          <td style={{ ...S.td, color: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? C.blue : C.faint }}>{si + 1}</td>
-                                          <td style={S.td}><TRow name={s.name} size={20} /></td>
-                                          <td style={S.td}>{s.pj}</td>
-                                          <td style={{ ...S.td, fontWeight: 700 }}>{s.pts}</td>
-                                          <td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red }}>{s.gd > 0 ? "+" : ""}{s.gd}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                                <div style={{ marginTop: 10 }}>
-                                  {g.matches.map((m, mi) => (
-                                    <div key={mi} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", fontSize: 12 }}>
-                                      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
-                                        <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={18} />
-                                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: m.played && m.scoreA > m.scoreB ? 700 : 400 }}>{m.teamA}</span>
-                                      </div>
-                                      {m.played ? <span style={{ fontWeight: 700, letterSpacing: 2, color: C.gold, flexShrink: 0 }}>{m.scoreA}—{m.scoreB}</span> : <span style={{ color: C.faint, flexShrink: 0 }}>vs</span>}
-                                      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", overflow: "hidden" }}>
-                                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: m.played && m.scoreB > m.scoreA ? 700 : 400 }}>{m.teamB}</span>
-                                        <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={18} />
-                                      </div>
-                                    </div>
+                    {isExpanded && (
+                      <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
+                        {hasGroups && t.groups.map((g, gi) => (
+                          <div key={gi} style={{ marginBottom: 20 }}>
+                            <p style={{ ...S.sectionTitle, color: C.gold }}>Grupo {g.name}</p>
+                            <div style={{ overflowX: "auto", marginBottom: 10 }}>
+                              <table style={{ minWidth: 240 }}>
+                                <thead><tr>{["", "Equipo", "PJ", "PTS", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                                <tbody>
+                                  {g.standings.map((s, si) => (
+                                    <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}>
+                                      <td style={{ ...S.td, color: C.faint, width: 24 }}>{si + 1}</td>
+                                      <td style={S.td}><TRow name={s.name} size={20} /></td>
+                                      <td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td>
+                                      <td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td>
+                                      <td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td>
+                                    </tr>
                                   ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {g.matches.map((m, mi) => (
+                              <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0, fontWeight: m.played && m.scoreA > m.scoreB ? 700 : 400 }}>
+                                  <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={20} />
+                                  <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
+                                </div>
+                                <div style={{ flexShrink: 0, minWidth: 46, textAlign: "center" }}>
+                                  {m.played ? <span style={{ fontWeight: 700, fontSize: 14, color: C.gold, letterSpacing: 1 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ fontSize: 11, color: C.faint }}>vs</span>}
+                                </div>
+                                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", minWidth: 0, fontWeight: m.played && m.scoreB > m.scoreA ? 700 : 400 }}>
+                                  <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span>
+                                  <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={20} />
                                 </div>
                               </div>
                             ))}
                           </div>
-                        </div>
-                      )}
-                      {hasElim && (
-                        <div>
-                          <p style={S.sectionTitle}>Cuadro eliminatorio</p>
-                          {t.eliminationRounds.map((round, ri) => (
-                            <div key={ri} style={{ marginBottom: 16 }}>
-                              <p style={{ ...S.label, color: C.gold, marginBottom: 8 }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
-                              {round.matches.map((m, mi) => (
-                                <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "rgba(255,255,255,0.015)", borderRadius: 7, marginBottom: 6 }}>
-                                  <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontWeight: m.winner === m.teamA ? 700 : 400, color: m.winner === m.teamA ? C.blue : C.text, overflow: "hidden" }}>
-                                    <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={22} />
-                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{m.teamA}</span>
-                                  </div>
-                                  {m.winner ? <span style={{ fontWeight: 700, letterSpacing: 3, color: C.blue, flexShrink: 0 }}>{m.scoreA}—{m.scoreB}</span> : <span style={{ color: C.faint, fontSize: 11, flexShrink: 0 }}>pdte</span>}
-                                  <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end", fontWeight: m.winner === m.teamB ? 700 : 400, color: m.winner === m.teamB ? C.blue : C.text, overflow: "hidden" }}>
-                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{m.teamB}</span>
-                                    <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={22} />
-                                  </div>
+                        ))}
+                        {hasElim && t.eliminationRounds.map((round, ri) => (
+                          <div key={ri} style={{ marginBottom: 14 }}>
+                            <p style={{ ...S.sectionTitle, color: C.gold }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
+                            {round.matches.map((m, mi) => (
+                              <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 6 }}>
+                                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontWeight: m.winner === m.teamA ? 700 : 400, color: m.winner === m.teamA ? C.blue : C.text }}>
+                                  <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={24} />
+                                  <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
                                 </div>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                                <div style={{ flexShrink: 0, minWidth: 50, textAlign: "center" }}>
+                                  {m.winner ? <span style={{ fontWeight: 700, fontSize: 14, color: C.blue, letterSpacing: 1 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ fontSize: 11, color: C.faint }}>pdte</span>}
+                                </div>
+                                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end", minWidth: 0, fontWeight: m.winner === m.teamB ? 700 : 400, color: m.winner === m.teamB ? C.blue : C.text }}>
+                                  <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span>
+                                  <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={24} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
           </>
         )}
 
         {/* NOTICIAS */}
         {tab === "noticias" && (
           <>
-            <h1 style={{ fontSize: "clamp(18px,4vw,24px)", fontWeight: 700, margin: "0 0 20px" }}>Noticias</h1>
-            {news.length === 0 ? (
-              <div style={{ border: "1px dashed rgba(255,255,255,0.07)", borderRadius: 10, padding: 48, textAlign: "center", color: C.faint }}>No hay noticias.</div>
-            ) : news.map(n => (
-              <div key={n.id} className="hover-card" style={{ ...S.card, cursor: "pointer", transition: "border-color .15s" }} onClick={() => setExpandedNews(expandedNews === n.id ? null : n.id)}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 7 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span style={S.tag(catColor[n.category] || C.blue)}>{n.category}</span>
-                    <h3 style={{ margin: 0, fontSize: "clamp(13px,3vw,15px)", fontWeight: 700 }}>{n.title}</h3>
+            <p style={S.pageTitle}>Noticias</p>
+            <p style={S.pageSubtitle}>{news.length} publicaciones</p>
+            {news.length === 0
+              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay noticias.</div>
+              : news.map(n => (
+                <div key={n.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => setExpandedNews(expandedNews === n.id ? null : n.id)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8, marginBottom: 5 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
+                        <span style={S.tag(catColor[n.category] || C.blue)}>{n.category}</span>
+                        <span style={{ fontSize: 10, color: C.faint }}>{new Date(n.createdAt).toLocaleDateString("es-ES")}</span>
+                      </div>
+                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{n.title}</h3>
+                    </div>
+                    <span style={{ color: C.faint, fontSize: 16, flexShrink: 0 }}>{expandedNews === n.id ? "▲" : "▼"}</span>
                   </div>
-                  <span style={{ color: C.faint, fontSize: 14, flexShrink: 0 }}>{expandedNews === n.id ? "▲" : "▼"}</span>
+                  {expandedNews === n.id && <p style={{ margin: "10px 0 0", fontSize: 14, color: "#8a9ab4", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.body}</p>}
                 </div>
-                <p style={{ margin: 0, fontSize: 11, color: C.faint }}>{new Date(n.createdAt).toLocaleDateString("es-ES")}</p>
-                {expandedNews === n.id && <p style={{ margin: "12px 0 0", fontSize: 14, color: "#8a9ab4", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.body}</p>}
-              </div>
-            ))}
+              ))
+            }
           </>
         )}
 
         {/* PALMARES */}
         {tab === "palmares" && (
           <>
-            <h1 style={{ fontSize: "clamp(18px,4vw,24px)", fontWeight: 700, margin: "0 0 20px" }}>🏆 Palmarés</h1>
+            <p style={S.pageTitle}>🏆 Palmarés</p>
+            <p style={S.pageSubtitle}>Historial de campeones</p>
             {(() => {
               const palmares = tournaments.filter(t => t.winner && t.status === "Finalizado");
-              if (palmares.length === 0) return <div style={{ border: "1px dashed rgba(255,255,255,0.07)", borderRadius: 10, padding: 48, textAlign: "center", color: C.faint }}>Aún no hay torneos finalizados.</div>;
+              if (palmares.length === 0) return <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Aún no hay torneos finalizados.</div>;
               const counts = {};
               palmares.forEach(t => { counts[t.winner] = (counts[t.winner] || 0) + 1; });
               const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
               return (
                 <>
-                  <div style={{ ...S.card, marginBottom: 20 }}>
-                    <p style={S.label}>Ranking de campeones</p>
-                    <div style={{ overflowX: "auto" }}>
-                      <table style={{ minWidth: 220 }}>
-                        <thead><tr>{["#", "Equipo", "Títulos"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                        <tbody>{sorted.map(([name, count], i) => (
-                          <tr key={name}>
-                            <td style={{ ...S.td, color: i === 0 ? C.gold : C.faint }}>{i === 0 ? "👑" : i + 1}</td>
-                            <td style={S.td}><TRow name={name} size={24} /></td>
-                            <td style={{ ...S.td, color: C.gold, fontWeight: 700 }}>{"🏆".repeat(Math.min(count, 5))} {count}</td>
-                          </tr>
-                        ))}</tbody>
-                      </table>
-                    </div>
+                  <div style={{ ...S.card, marginBottom: 16 }}>
+                    <p style={{ ...S.label, marginBottom: 12 }}>Ranking</p>
+                    {sorted.map(([name, count], i) => (
+                      <div key={name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                        <span style={{ fontSize: i === 0 ? 20 : 13, color: i === 0 ? C.gold : C.faint, minWidth: 28, textAlign: "center" }}>{i === 0 ? "👑" : i + 1}</span>
+                        <TeamLogo name={name} logoUrl={logoMap[name]} size={36} />
+                        <span style={{ flex: 1, fontWeight: i === 0 ? 700 : 400, color: i === 0 ? C.gold : C.text, fontSize: 14 }}>{name}</span>
+                        <span style={{ color: C.gold, fontSize: 13 }}>{count} 🏆</span>
+                      </div>
+                    ))}
                   </div>
                   {palmares.map(t => (
-                    <div key={t.id} style={{ ...S.card, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 22 }}>🏆</span>
-                      <div style={{ flex: 1, minWidth: 100 }}>
-                        <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700 }}>{t.name}</h3>
-                        <p style={{ margin: 0, color: C.muted, fontSize: 11 }}>{t.format} · {new Date(t.createdAt).toLocaleDateString("es-ES")}</p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                        <TeamLogo name={t.winner} logoUrl={logoMap[t.winner]} size={38} />
-                        <div>
-                          <p style={{ margin: "0 0 2px", color: C.gold, fontWeight: 700, fontSize: 14 }}>{t.winner}</p>
-                          <p style={{ margin: 0, color: C.faint, fontSize: 11 }}>Campeón</p>
-                        </div>
+                    <div key={t.id} style={{ ...S.card, display: "flex", alignItems: "center", gap: 14 }}>
+                      <TeamLogo name={t.winner} logoUrl={logoMap[t.winner]} size={44} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: 14, color: C.gold, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.winner}</p>
+                        <p style={{ margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</p>
+                        <p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{t.format} · {new Date(t.createdAt).toLocaleDateString("es-ES")}</p>
                       </div>
                     </div>
                   ))}
@@ -364,66 +354,76 @@ export default function UserDashboard({ onLogout }) {
         )}
 
         {/* MIS INSCRIPCIONES */}
-        {tab === "mis-inscripciones" && (
+        {tab === "mis" && (
           <>
-            <h1 style={{ fontSize: "clamp(18px,4vw,24px)", fontWeight: 700, margin: "0 0 20px" }}>Mis inscripciones</h1>
-            {myInscriptions.length === 0 ? (
-              <div style={{ border: "1px dashed rgba(255,255,255,0.07)", borderRadius: 10, padding: 48, textAlign: "center", color: C.faint }}>Aún no te has inscrito en ningún torneo.</div>
-            ) : myInscriptions.map(i => {
-              const tournament = tournaments.find(t => t.id === i.tournamentId);
-              const myMatches = [];
-              tournament?.groups?.forEach(g => g.matches.forEach(m => {
-                if (m.teamA === i.teamName || m.teamB === i.teamName) myMatches.push({ ...m, phase: "Grupos" });
-              }));
-              tournament?.eliminationRounds?.forEach((r, ri) => r.matches.forEach(m => {
-                if (m.teamA === i.teamName || m.teamB === i.teamName) myMatches.push({ ...m, phase: getRoundName(tournament.eliminationRounds.length, ri) });
-              }));
-              return (
-                <div key={i.id} style={S.card}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <p style={S.pageTitle}>Mis inscripciones</p>
+            <p style={S.pageSubtitle}>{myInscriptions.length} torneos</p>
+            {myInscriptions.length === 0
+              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Aún no te has inscrito.</div>
+              : myInscriptions.map(i => {
+                const tournament = tournaments.find(t => t.id === i.tournamentId);
+                const myMatches = [];
+                tournament?.groups?.forEach(g => g.matches.forEach(m => {
+                  if (m.teamA === i.teamName || m.teamB === i.teamName) myMatches.push({ ...m, phase: "Grupos" });
+                }));
+                tournament?.eliminationRounds?.forEach((r, ri) => r.matches.forEach(m => {
+                  if (m.teamA === i.teamName || m.teamB === i.teamName) myMatches.push({ ...m, phase: getRoundName(tournament.eliminationRounds.length, ri) });
+                }));
+                return (
+                  <div key={i.id} style={S.card}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
                       <TeamLogo name={i.teamName} logoUrl={i.logoUrl} size={52} />
-                      <div>
-                        <h3 style={{ margin: "0 0 3px", fontSize: "clamp(14px,3vw,18px)", fontWeight: 700 }}>{i.teamName}</h3>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <h3 style={{ margin: "0 0 3px", fontSize: 17, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.teamName}</h3>
                         <p style={{ margin: "0 0 2px", color: C.muted, fontSize: 12 }}>{i.tournamentName}</p>
-                        {i.managerId && <p style={{ margin: "0 0 1px", color: C.faint, fontSize: 11 }}>ID: {i.managerId}</p>}
-                        {i.twitter && <p style={{ margin: 0, color: C.blue, fontSize: 11 }}>{i.twitter}</p>}
+                        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                          <span style={S.tag(i.status === "aprobada" ? C.green : i.status === "rechazada" ? C.red : C.gold)}>
+                            {i.status === "aprobada" ? "✓ Aprobado" : i.status === "rechazada" ? "Rechazado" : "⏳ Pendiente"}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <span style={S.tag(i.status === "aprobada" ? C.green : i.status === "rechazada" ? C.red : C.gold)}>
-                      {i.status === "aprobada" ? "✓ Aprobado" : i.status === "rechazada" ? "Rechazado" : "⏳ Pendiente"}
-                    </span>
+                    {(i.managerId || i.phone || i.twitter) && (
+                      <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 10, marginBottom: myMatches.length > 0 ? 10 : 0 }}>
+                        {i.managerId && <p style={{ margin: "0 0 3px", fontSize: 12, color: C.muted }}>ID Manager: <strong style={{ color: C.text }}>{i.managerId}</strong></p>}
+                        {i.phone && <p style={{ margin: "0 0 3px", fontSize: 12, color: C.muted }}>📞 {i.phone}</p>}
+                        {i.twitter && <p style={{ margin: 0, fontSize: 12, color: C.blue }}>{i.twitter}</p>}
+                      </div>
+                    )}
+                    {myMatches.length > 0 && (
+                      <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+                        <p style={{ ...S.label, marginBottom: 8 }}>Partidos</p>
+                        {myMatches.map((m, idx) => (
+                          <div key={idx}>
+                            <span style={{ fontSize: 10, color: C.faint, letterSpacing: 1 }}>{m.phase}</span>
+                            <MatchRow m={m} myTeam={i.teamName} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {myMatches.length > 0 && (
-                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 14 }}>
-                      <p style={S.label}>Tus partidos</p>
-                      {myMatches.map((m, idx) => (
-                        <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 10, color: C.faint, minWidth: 65, letterSpacing: 1 }}>{m.phase}</span>
-                          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, fontWeight: m.teamA === i.teamName ? 700 : 400, color: m.teamA === i.teamName ? C.gold : C.text, overflow: "hidden" }}>
-                            <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={18} />
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{m.teamA}</span>
-                          </div>
-                          {(m.played || m.winner) ? <span style={{ fontWeight: 700, letterSpacing: 2, color: C.gold, flexShrink: 0 }}>{m.scoreA}—{m.scoreB}</span> : <span style={{ color: C.faint, fontSize: 11, flexShrink: 0 }}>vs</span>}
-                          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", fontWeight: m.teamB === i.teamName ? 700 : 400, color: m.teamB === i.teamName ? C.gold : C.text, overflow: "hidden" }}>
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{m.teamB}</span>
-                            <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={18} />
-                          </div>
-                          {(m.played || m.winner) && (() => {
-                            const won = (m.winner && m.winner === i.teamName) || (!m.winner && ((m.teamA === i.teamName && m.scoreA > m.scoreB) || (m.teamB === i.teamName && m.scoreB > m.scoreA)));
-                            const drew = !m.winner && m.scoreA === m.scoreB;
-                            return <span style={S.tag(won ? C.green : drew ? C.gold : C.red)}>{won ? "V" : drew ? "E" : "D"}</span>;
-                          })()}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })
+            }
+          </>
+        )}
+
+        {/* NORMATIVA */}
+        {tab === "normativa" && (
+          <>
+            <p style={S.pageTitle}>Normativa</p>
+            <p style={S.pageSubtitle}>Reglamento oficial del torneo</p>
+            {NORMATIVA.map((n, i) => (
+              <div key={i} style={S.card}>
+                <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14, color: C.gold }}>{n.titulo}</p>
+                <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.65 }}>{n.texto}</p>
+              </div>
+            ))}
           </>
         )}
       </main>
+
+      <BottomNav tabs={TABS} active={tab} onChange={setTab} color={C.gold} />
     </div>
   );
 }

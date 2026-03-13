@@ -28,9 +28,8 @@ export function buildGroups(teams, groupCount, legs = 1) {
     for (let a = 0; a < g.teams.length; a++) {
       for (let b = a + 1; b < g.teams.length; b++) {
         matches.push({ teamA: g.teams[a], teamB: g.teams[b], scoreA: null, scoreB: null, played: false, leg: 1 });
-        if (legs === 2) {
+        if (legs === 2)
           matches.push({ teamA: g.teams[b], teamB: g.teams[a], scoreA: null, scoreB: null, played: false, leg: 2 });
-        }
       }
     }
     g.matches = matches;
@@ -51,13 +50,10 @@ export function applyGroupResult(standings, teamA, teamB, scoreA, scoreB) {
 
 export function buildSeededElimination(groups, qualify) {
   const byPosition = [];
-  for (let pos = 0; pos < qualify; pos++) {
+  for (let pos = 0; pos < qualify; pos++)
     byPosition.push(groups.map(g => g.standings[pos]?.name).filter(Boolean));
-  }
-  const matches = [];
-  const numGroups = groups.length;
-  const firstPlace = byPosition[0] || [];
-  const secondPlace = byPosition[1] || [];
+  const matches = [], numGroups = groups.length;
+  const firstPlace = byPosition[0] || [], secondPlace = byPosition[1] || [];
   if (secondPlace.length > 0) {
     for (let i = 0; i < firstPlace.length; i++) {
       const oppIdx = (i + Math.floor(numGroups / 2)) % numGroups;
@@ -93,7 +89,7 @@ export function TeamLogo({ name, logoUrl, size = 28 }) {
   if (logoUrl) {
     return (
       <img src={logoUrl} alt={name}
-        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030" }}
+        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }}
         onError={e => { e.target.style.display = "none"; }} />
     );
   }
@@ -111,82 +107,121 @@ export function TeamLogo({ name, logoUrl, size = 28 }) {
   );
 }
 
-// ── Shared UI tokens ──────────────────────────────────────────────
+// ── Bottom nav tab bar (mobile-first) ──────────────────────
+export function BottomNav({ tabs, active, onChange, color = C.gold }) {
+  return (
+    <nav style={{
+      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
+      background: "rgba(10,13,20,0.98)", backdropFilter: "blur(20px)",
+      borderTop: "1px solid rgba(255,255,255,0.06)",
+      display: "flex", alignItems: "stretch",
+      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+    }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onChange(t.id)} style={{
+          flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", gap: 3, padding: "10px 4px 8px",
+          background: "none", border: "none", cursor: "pointer",
+          color: active === t.id ? color : C.muted,
+          fontFamily: "'Georgia',serif", transition: "color .15s",
+          minWidth: 0,
+        }}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>{t.icon}</span>
+          <span style={{ fontSize: 9, letterSpacing: 1, textTransform: "uppercase", lineHeight: 1 }}>{t.label}</span>
+          {t.badge > 0 && (
+            <span style={{ position: "absolute", top: 6, fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif" }}>{t.badge}</span>
+          )}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export const S = {
   wrap: { minHeight: "100vh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
-  header: {
-    padding: "0 clamp(16px,4vw,32px)", display: "flex", alignItems: "center",
-    justifyContent: "space-between", height: 58,
+  topBar: {
+    padding: "0 16px", display: "flex", alignItems: "center",
+    justifyContent: "space-between", height: 54,
     background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)",
     borderBottom: "1px solid rgba(255,255,255,0.05)",
     position: "sticky", top: 0, zIndex: 100,
   },
-  main: { maxWidth: 1080, margin: "0 auto", padding: "clamp(24px,4vw,44px) clamp(16px,4vw,32px)" },
+  // main with bottom padding for nav bar
+  main: { maxWidth: 680, margin: "0 auto", padding: "20px 16px 90px" },
   card: {
     border: "1px solid rgba(255,255,255,0.06)", background: C.card,
-    borderRadius: 10, padding: "clamp(16px,3vw,24px)", marginBottom: 12,
+    borderRadius: 12, padding: 16, marginBottom: 10,
   },
-  cardHover: { cursor: "pointer", transition: "border-color .15s,background .15s" },
-  label: { fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 8 },
+  label: { fontSize: 10, letterSpacing: 2.5, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
   input: {
-    width: "100%", padding: "11px 14px", fontSize: 14, borderRadius: 7,
-    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)",
+    width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10,
+    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
     color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif",
-    transition: "border-color .15s",
+    WebkitAppearance: "none", // prevent iOS zoom
   },
   textarea: {
-    width: "100%", padding: "11px 14px", fontSize: 14, borderRadius: 7,
-    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)",
+    width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10,
+    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
     color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif",
-    minHeight: 100, resize: "vertical",
+    minHeight: 110, resize: "vertical", WebkitAppearance: "none",
   },
   select: {
-    width: "100%", padding: "11px 14px", fontSize: 14, borderRadius: 7,
+    width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10,
     background: "#0d1117", border: "1px solid rgba(255,255,255,0.09)",
-    color: C.text, fontFamily: "'Georgia',serif",
+    color: C.text, fontFamily: "'Georgia',serif", WebkitAppearance: "none",
+    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a6880' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")",
+    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center",
+    paddingRight: 36,
   },
   btn: (color = "#4f8ef7") => ({
-    padding: "10px 22px", background: color, border: "none", borderRadius: 7,
+    padding: "14px 20px", background: color, border: "none", borderRadius: 10,
     color: color === "#e8b84b" ? "#07090f" : "#fff",
-    cursor: "pointer", letterSpacing: 1.5, textTransform: "uppercase",
+    cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
+    fontSize: 13, fontWeight: 700, fontFamily: "'Georgia',serif",
+    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
+    width: "100%",
+  }),
+  btnInline: (color = "#4f8ef7") => ({
+    padding: "10px 18px", background: color, border: "none", borderRadius: 8,
+    color: color === "#e8b84b" ? "#07090f" : "#fff",
+    cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
     fontSize: 11, fontWeight: 700, fontFamily: "'Georgia',serif",
-    whiteSpace: "nowrap", transition: "opacity .15s, transform .1s",
+    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
+    flexShrink: 0,
   }),
   btnSm: {
-    padding: "6px 14px", background: "transparent", borderRadius: 6,
+    padding: "8px 14px", background: "transparent", borderRadius: 8,
     border: "1px solid rgba(255,255,255,0.13)", color: C.muted,
-    cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+    cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
     fontFamily: "'Georgia',serif", whiteSpace: "nowrap",
+    WebkitTapHighlightColor: "transparent", flexShrink: 0,
   },
   btnDanger: {
-    padding: "6px 14px", background: "transparent", borderRadius: 6,
+    padding: "8px 14px", background: "transparent", borderRadius: 8,
     border: "1px solid rgba(247,111,111,0.3)", color: "#f76f6f",
-    cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
-    fontFamily: "'Georgia',serif",
+    cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
+    fontFamily: "'Georgia',serif", WebkitTapHighlightColor: "transparent",
   },
   tag: (color) => ({
-    fontSize: 9, letterSpacing: 2, padding: "3px 9px", borderRadius: 20,
+    fontSize: 9, letterSpacing: 1.5, padding: "3px 9px", borderRadius: 20,
     background: `${color}1a`, color, border: `1px solid ${color}40`,
     textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap",
   }),
-  tab: (active, color = "#4f8ef7") => ({
-    padding: "12px clamp(12px,2vw,22px)", background: "none", border: "none",
-    borderBottom: active ? `2px solid ${color}` : "2px solid transparent",
-    color: active ? color : C.muted, cursor: "pointer",
-    fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
-    fontFamily: "'Georgia',serif", marginBottom: -1, whiteSpace: "nowrap",
-    transition: "color .15s",
-  }),
   th: {
-    fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: C.muted,
-    padding: "10px 12px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)",
+    fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted,
+    padding: "9px 10px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)",
   },
-  td: { padding: "10px 12px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
+  td: { padding: "10px 10px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
   numInput: {
-    width: 46, padding: "6px 4px", textAlign: "center", borderRadius: 6,
-    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-    color: C.text, fontFamily: "'Georgia',serif", fontSize: 13,
+    width: 44, padding: "8px 4px", textAlign: "center", borderRadius: 8,
+    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+    color: C.text, fontFamily: "'Georgia',serif", fontSize: 15,
+    WebkitAppearance: "none",
   },
-  divider: { height: 1, background: "rgba(255,255,255,0.05)", margin: "20px 0" },
-  sectionTitle: { fontSize: 10, letterSpacing: 4, textTransform: "uppercase", color: C.blue, marginBottom: 16 },
+  sectionTitle: {
+    fontSize: 10, letterSpacing: 3, textTransform: "uppercase",
+    color: C.blue, margin: "0 0 14px",
+  },
+  pageTitle: { fontSize: 22, fontWeight: 700, margin: "0 0 4px" },
+  pageSubtitle: { fontSize: 13, color: C.muted, margin: "0 0 20px" },
 };

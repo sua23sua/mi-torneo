@@ -12,7 +12,7 @@ function AppInner() {
   const [showLogin, setShowLogin] = useState(false);
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", background: "#080c14", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Georgia', serif", color: "#388bff", letterSpacing: 4, fontSize: 12, textTransform: "uppercase" }}>
+    <div style={{ minHeight: "100vh", background: "#07090f", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Georgia',serif", color: "#4f8ef7", letterSpacing: 4, fontSize: 12, textTransform: "uppercase" }}>
       Cargando...
     </div>
   );
