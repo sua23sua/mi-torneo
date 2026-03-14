@@ -10,10 +10,7 @@ export const statusColor = {
 };
 
 export const matchStatusColor = {
-  pendiente: "#5a6880",
-  parcial: "#f7934f",
-  conflicto: "#f76f6f",
-  validado: "#52d68a",
+  pendiente: "#5a6880", parcial: "#f7934f", conflicto: "#f76f6f", validado: "#52d68a",
 };
 
 export function getRoundName(totalRounds, roundIdx) {
@@ -24,37 +21,37 @@ export function getRoundName(totalRounds, roundIdx) {
 
 export function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
 
-export function buildGroups(teams, groupCount, legs = 1) {
-  const shuffled = shuffle(teams);
-  const groups = Array.from({ length: groupCount }, (_, i) => ({
-    name: String.fromCharCode(65 + i), teams: [], matches: [], standings: [], legs,
-  }));
-  shuffled.forEach((t, i) => groups[i % groupCount].teams.push(t));
-  groups.forEach((g) => {
-    g.standings = g.teams.map((t) => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 }));
-    const matches = [];
-    for (let a = 0; a < g.teams.length; a++) {
-      for (let b = a + 1; b < g.teams.length; b++) {
-        matches.push(makeMatch(g.teams[a], g.teams[b], 1));
-        if (legs === 2) matches.push(makeMatch(g.teams[b], g.teams[a], 2));
-      }
+// ── Round-robin matchday algorithm ────────────────────────────────
+// Returns array of matchdays: [ [ {teamA, teamB}, ... ], ... ]
+// Uses the "circle method" to generate balanced rounds.
+function roundRobinMatchdays(teams) {
+  const n = teams.length;
+  const list = [...teams];
+  // If odd number of teams, add a BYE
+  if (n % 2 !== 0) list.push("BYE");
+  const total = list.length;
+  const rounds = total - 1;
+  const matchdays = [];
+  const t = [...list];
+  for (let r = 0; r < rounds; r++) {
+    const day = [];
+    for (let i = 0; i < total / 2; i++) {
+      const a = t[i], b = t[total - 1 - i];
+      if (a !== "BYE" && b !== "BYE") day.push({ teamA: a, teamB: b });
     }
-    g.matches = matches;
-  });
-  return groups;
+    matchdays.push(day);
+    // Rotate all except first element
+    t.splice(1, 0, t.pop());
+  }
+  return matchdays;
 }
 
-// A match object — all report fields included from creation
-export function makeMatch(teamA, teamB, leg = 1) {
+export function makeMatch(teamA, teamB, leg = 1, matchday = 1) {
   return {
-    teamA, teamB, leg,
-    scoreA: null, scoreB: null,
-    played: false,
-    // report fields
-    reportByA: null,   // { scoreA, scoreB, userId, userName, at }
-    reportByB: null,   // { scoreA, scoreB, userId, userName, at }
-    matchStatus: "pendiente", // pendiente | parcial | conflicto | validado
-    winner: null,
+    teamA, teamB, leg, matchday,
+    scoreA: null, scoreB: null, played: false,
+    reportByA: null, reportByB: null,
+    matchStatus: "pendiente", winner: null,
   };
 }
 
@@ -62,11 +59,43 @@ export function makeElimMatch(teamA, teamB) {
   return {
     teamA, teamB,
     scoreA: null, scoreB: null,
-    winner: null,
-    reportByA: null,
-    reportByB: null,
+    winner: null, reportByA: null, reportByB: null,
     matchStatus: "pendiente",
   };
+}
+
+// Build groups with matchdays assigned to each match
+export function buildGroups(teams, groupCount, legs = 1) {
+  const shuffled = shuffle(teams);
+  const groups = Array.from({ length: groupCount }, (_, i) => ({
+    name: String.fromCharCode(65 + i), teams: [], matches: [], standings: [], legs,
+  }));
+  shuffled.forEach((t, i) => groups[i % groupCount].teams.push(t));
+
+  groups.forEach((g) => {
+    g.standings = g.teams.map((t) => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 }));
+    const days = roundRobinMatchdays(g.teams);
+    const matches = [];
+    // Leg 1
+    days.forEach((day, di) => {
+      day.forEach(({ teamA, teamB }) => {
+        matches.push(makeMatch(teamA, teamB, 1, di + 1));
+      });
+    });
+    // Leg 2 — reverse fixtures, offset matchday numbers
+    if (legs === 2) {
+      days.forEach((day, di) => {
+        day.forEach(({ teamA, teamB }) => {
+          matches.push(makeMatch(teamB, teamA, 2, days.length + di + 1));
+        });
+      });
+    }
+    g.matches = matches;
+    // Total matchdays in this group
+    g.totalMatchdays = legs === 2 ? days.length * 2 : days.length;
+  });
+
+  return groups;
 }
 
 export function applyGroupResult(standings, teamA, teamB, scoreA, scoreB) {
@@ -116,12 +145,22 @@ export function buildEliminationRound(teams) {
   return matches;
 }
 
-// Given a match and a report from one side, compute the new matchStatus
 export function computeMatchStatus(match, side, scoreA, scoreB) {
   const other = side === "A" ? match.reportByB : match.reportByA;
   if (!other) return "parcial";
   if (other.scoreA === scoreA && other.scoreB === scoreB) return "validado";
   return "conflicto";
+}
+
+// Format a datetime string nicely in Spanish
+export function formatDatetime(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString("es-ES", {
+      weekday: "short", day: "numeric", month: "short",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return iso; }
 }
 
 export function TeamLogo({ name, logoUrl, size = 28 }) {

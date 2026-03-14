@@ -3,7 +3,7 @@ import { db, storage } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "../AuthContext";
-import { C, S, statusColor, getRoundName, TeamLogo, BottomNav } from "../shared.jsx";
+import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime } from "../shared.jsx";
 import MatchesPanel from "./MatchesPanel.jsx";
 
 const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
@@ -102,16 +102,13 @@ export default function UserDashboard({ onLogout }) {
     );
   }
 
-  // Count pending matches for my teams
   const myTeamNames = new Set(myInscriptions.filter(i => i.status === "aprobada").map(i => i.teamName));
   const pendingMyMatches = tournaments.flatMap(t => {
     if (t.status !== "En curso") return [];
-    const gMatches = (t.groups || []).flatMap(g => g.matches || []);
-    const eMatches = (t.eliminationRounds || []).flatMap(r => r.matches || []);
-    return [...gMatches, ...eMatches].filter(m =>
-      (myTeamNames.has(m.teamA) || myTeamNames.has(m.teamB)) &&
-      (m.matchStatus || "pendiente") !== "validado"
-    );
+    return [
+      ...(t.groups || []).flatMap(g => g.matches || []),
+      ...(t.eliminationRounds || []).flatMap(r => r.matches || []),
+    ].filter(m => (myTeamNames.has(m.teamA) || myTeamNames.has(m.teamB)) && (m.matchStatus || "pendiente") !== "validado");
   }).length;
 
   const navTabs = TABS.map(t => ({ ...t, badge: t.id === "partidos" && pendingMyMatches > 0 ? pendingMyMatches : 0 }));
@@ -131,7 +128,15 @@ export default function UserDashboard({ onLogout }) {
             <div style={{ width: 80 }} />
           </div>
           <div style={{ padding: "24px 16px 40px", flex: 1 }}>
-            <p style={{ margin: "0 0 24px", color: C.muted, fontSize: 14 }}>{selectedTournament.name}</p>
+            <p style={{ margin: "0 0 6px", color: C.muted, fontSize: 14 }}>{selectedTournament.name}</p>
+            {selectedTournament.whatsappLink && (
+              <a href={selectedTournament.whatsappLink} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 20 }}>
+                <span style={{ fontSize: 18 }}>💬</span>
+                <span style={{ fontSize: 13, color: "#25d366", fontWeight: 600 }}>Unirse al grupo de WhatsApp del torneo</span>
+                <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
+              </a>
+            )}
             <div style={{ marginBottom: 20 }}>
               <label style={S.label}>Escudo del equipo</label>
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -176,7 +181,6 @@ export default function UserDashboard({ onLogout }) {
 
       <main style={S.main}>
 
-        {/* TORNEOS */}
         {tab === "torneos" && (
           <>
             <p style={S.pageTitle}>Torneos</p>
@@ -188,13 +192,19 @@ export default function UserDashboard({ onLogout }) {
                 const isExpanded = expandedTId === t.id;
                 const hasGroups = t.groups?.length > 0;
                 const hasElim = t.eliminationRounds?.length > 0;
+
+                // Next scheduled matchday
+                const schedule = t.matchdaySchedule || {};
+                const upcoming = Object.values(schedule).filter(d => d && new Date(d) > new Date()).sort()[0];
+
                 return (
                   <div key={t.id} style={S.card}>
                     <div style={{ display: "flex", alignItems: "start", gap: 12, marginBottom: 12 }}>
                       <div style={{ width: 44, height: 44, background: "rgba(232,184,75,0.08)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎮</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
-                        <p style={{ margin: "0 0 6px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
+                        <p style={{ margin: "0 0 5px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
+                        {upcoming && <p style={{ margin: "0 0 6px", fontSize: 12, color: C.blue }}>🕐 Próxima jornada: {formatDatetime(upcoming)}</p>}
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
                           {myInsc && <span style={S.tag(myInsc.status === "aprobada" ? C.green : myInsc.status === "rechazada" ? C.red : C.gold)}>
@@ -203,6 +213,17 @@ export default function UserDashboard({ onLogout }) {
                         </div>
                       </div>
                     </div>
+
+                    {/* WhatsApp group link */}
+                    {t.whatsappLink && myInsc?.status === "aprobada" && (
+                      <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.07)", border: "1px solid rgba(37,211,102,0.18)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 10 }}>
+                        <span style={{ fontSize: 16 }}>💬</span>
+                        <span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp del torneo</span>
+                        <span style={{ marginLeft: "auto", color: C.faint, fontSize: 14 }}>→</span>
+                      </a>
+                    )}
+
                     <div style={{ display: "flex", gap: 8 }}>
                       {!myInsc && t.status === "Abierto" && (
                         <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={() => { setSelectedTournament(t); setShowModal(true); }}>Inscribirse</button>
@@ -211,13 +232,14 @@ export default function UserDashboard({ onLogout }) {
                         <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Clasificación ▼"}</button>
                       )}
                     </div>
+
                     {isExpanded && (
                       <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
                         {hasGroups && t.groups.map((g, gi) => (
-                          <div key={gi} style={{ marginBottom: 18 }}>
+                          <div key={gi} style={{ marginBottom: 16 }}>
                             <p style={{ ...S.sectionTitle, color: C.gold }}>Grupo {g.name}</p>
                             <div style={{ overflowX: "auto" }}>
-                              <table style={{ minWidth: 240, marginBottom: 10 }}>
+                              <table style={{ minWidth: 240, marginBottom: 4 }}>
                                 <thead><tr>{["", "Equipo", "PJ", "PTS", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                                 <tbody>
                                   {g.standings.map((s, si) => (
@@ -238,7 +260,7 @@ export default function UserDashboard({ onLogout }) {
                           <div key={ri} style={{ marginBottom: 14 }}>
                             <p style={{ ...S.sectionTitle, color: C.gold }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
                             {round.matches.map((m, mi) => (
-                              <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 6 }}>
+                              <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 5 }}>
                                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
                                   <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={22} />
                                   <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
@@ -262,22 +284,14 @@ export default function UserDashboard({ onLogout }) {
           </>
         )}
 
-        {/* PARTIDOS */}
         {tab === "partidos" && (
           <>
             <p style={S.pageTitle}>Partidos</p>
             <p style={S.pageSubtitle}>Torneos activos · reporta tus resultados</p>
-            <MatchesPanel
-              tournaments={tournaments}
-              inscriptions={allInscriptions}
-              currentUser={user}
-              isAdmin={false}
-              logoMap={logoMap}
-            />
+            <MatchesPanel tournaments={tournaments} inscriptions={allInscriptions} currentUser={user} isAdmin={false} logoMap={logoMap} />
           </>
         )}
 
-        {/* NOTICIAS */}
         {tab === "noticias" && (
           <>
             <p style={S.pageTitle}>Noticias</p>
@@ -303,11 +317,10 @@ export default function UserDashboard({ onLogout }) {
           </>
         )}
 
-        {/* MI EQUIPO */}
         {tab === "mis" && (
           <>
             <p style={S.pageTitle}>Mi equipo</p>
-            <p style={S.pageSubtitle}>Tus inscripciones y torneos</p>
+            <p style={S.pageSubtitle}>Tus inscripciones</p>
             {myInscriptions.length === 0
               ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Aún no te has inscrito.</div>
               : myInscriptions.map(i => {
@@ -325,46 +338,30 @@ export default function UserDashboard({ onLogout }) {
                       </div>
                     </div>
                     {(i.managerId || i.phone || i.twitter) && (
-                      <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 10 }}>
+                      <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 10, marginBottom: 10 }}>
                         {i.managerId && <p style={{ margin: "0 0 4px", fontSize: 12, color: C.muted }}>ID Manager: <strong style={{ color: C.text }}>{i.managerId}</strong></p>}
                         {i.phone && <p style={{ margin: "0 0 4px", fontSize: 12, color: C.muted }}>📞 {i.phone}</p>}
                         {i.twitter && <p style={{ margin: 0, fontSize: 12, color: C.blue }}>{i.twitter}</p>}
                       </div>
                     )}
+                    {tournament?.whatsappLink && i.status === "aprobada" && (
+                      <a href={tournament.whatsappLink} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.07)", border: "1px solid rgba(37,211,102,0.18)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 10 }}>
+                        <span style={{ fontSize: 16 }}>💬</span>
+                        <span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp</span>
+                        <span style={{ marginLeft: "auto", color: C.faint, fontSize: 14 }}>→</span>
+                      </a>
+                    )}
                     {i.status === "aprobada" && (
-                      <div style={{ marginTop: 12 }}>
-                        <button style={{ ...S.btnInline(C.blue) }} onClick={() => setTab("partidos")}>Ver mis partidos →</button>
-                      </div>
+                      <button style={{ ...S.btnInline(C.blue) }} onClick={() => setTab("partidos")}>Ver mis partidos →</button>
                     )}
                   </div>
                 );
               })
             }
-
-            {/* Palmares */}
-            {(() => {
-              const palmares = tournaments.filter(t => t.winner && t.status === "Finalizado");
-              if (palmares.length === 0) return null;
-              return (
-                <>
-                  <p style={{ ...S.pageTitle, marginTop: 24, fontSize: 18 }}>🏆 Palmarés</p>
-                  {palmares.map(t => (
-                    <div key={t.id} style={{ ...S.card, display: "flex", alignItems: "center", gap: 14 }}>
-                      <TeamLogo name={t.winner} logoUrl={logoMap[t.winner]} size={44} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: 14, color: C.gold }}>{t.winner}</p>
-                        <p style={{ margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</p>
-                        <p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{t.format} · {new Date(t.createdAt).toLocaleDateString("es-ES")}</p>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              );
-            })()}
           </>
         )}
 
-        {/* NORMATIVA */}
         {tab === "normativa" && (
           <>
             <p style={S.pageTitle}>Normativa</p>
