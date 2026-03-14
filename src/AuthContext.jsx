@@ -11,28 +11,22 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsub = null;
+    let unsubProfile = null;
     const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
-      if (unsub) unsub();
+      if (unsubProfile) { unsubProfile(); unsubProfile = null; }
       if (firebaseUser) {
-        unsub = onSnapshot(doc(db, "users", firebaseUser.uid), (snap) => {
+        unsubProfile = onSnapshot(doc(db, "users", firebaseUser.uid), async (snap) => {
           if (snap.exists()) {
             setProfile(snap.data());
           } else {
-            // Create default profile
             const defaultProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
+              uid: firebaseUser.uid, email: firebaseUser.email,
               name: firebaseUser.displayName || firebaseUser.email.split("@")[0],
-              role: "user",
-              teamName: "",
-              teamLogo: null,
-              elo: 1000,
-              stats: { pj: 0, pg: 0, pe: 0, pp: 0, titulos: 0 },
+              role: "user", teamId: null,
               createdAt: new Date().toISOString(),
             };
-            setDoc(doc(db, "users", firebaseUser.uid), defaultProfile);
+            await setDoc(doc(db, "users", firebaseUser.uid), defaultProfile);
             setProfile(defaultProfile);
           }
           setLoading(false);
@@ -42,7 +36,7 @@ export function AuthProvider({ children }) {
         setLoading(false);
       }
     });
-    return () => { unsubAuth(); if (unsub) unsub(); };
+    return () => { unsubAuth(); if (unsubProfile) unsubProfile(); };
   }, []);
 
   return (
@@ -52,6 +46,4 @@ export function AuthProvider({ children }) {
   );
 }
 
-export function useAuth() {
-  return useContext(AuthContext);
-}
+export function useAuth() { return useContext(AuthContext); }

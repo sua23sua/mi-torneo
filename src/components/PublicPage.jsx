@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { C, S, statusColor, getRoundName, TeamLogo, BottomNav } from "../shared.jsx";
+import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, isTournamentActive } from "../shared.jsx";
+import MatchesPanel from "./MatchesPanel.jsx";
+import RankingPanel from "./RankingPanel.jsx";
 
 const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
 
@@ -11,25 +13,34 @@ const NORMATIVA = [
   { titulo: "3. Puntualidad", texto: "10 minutos de margen. El incumplimiento puede suponer derrota por incomparecencia (0-3)." },
   { titulo: "4. Conducta", texto: "Comportamiento deportivo y respetuoso. Las infracciones pueden suponer expulsión." },
   { titulo: "5. Resultados", texto: "Reportados por ambos equipos. En caso de discrepancia, decide la organización." },
-  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), DG y GF. Empate directo en caso de igualdad." },
+  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), DG y GF." },
   { titulo: "7. Eliminatoria", texto: "No se permiten empates. En caso de igualdad se juegan penaltis." },
   { titulo: "8. Modificaciones", texto: "La organización puede modificar el formato en casos excepcionales." },
 ];
 
 const TABS = [
   { id: "torneos", icon: "🎮", label: "Torneos" },
+  { id: "partidos", icon: "⚽", label: "Partidos" },
+  { id: "ranking", icon: "📊", label: "Ranking" },
   { id: "noticias", icon: "📰", label: "Noticias" },
-  { id: "palmares", icon: "🏆", label: "Palmarés" },
   { id: "normativa", icon: "📋", label: "Normas" },
 ];
+
+const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 export default function PublicPage({ onLogin }) {
   const [tournaments, setTournaments] = useState([]);
   const [news, setNews] = useState([]);
   const [inscriptions, setInscriptions] = useState([]);
   const [tab, setTab] = useState("torneos");
+  const [tourneySubTab, setTourneySubTab] = useState("activos"); // activos | historial
   const [expandedTId, setExpandedTId] = useState(null);
   const [expandedNews, setExpandedNews] = useState(null);
+  // History filters
+  const now = new Date();
+  const [histMonth, setHistMonth] = useState(now.getMonth());
+  const [histYear, setHistYear] = useState(now.getFullYear());
+  const [histSearch, setHistSearch] = useState("");
 
   useEffect(() => {
     const u1 = onSnapshot(query(collection(db, "tournaments"), orderBy("createdAt", "desc")), snap => setTournaments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -40,44 +51,94 @@ export default function PublicPage({ onLogin }) {
 
   const logoMap = {};
   inscriptions.forEach(i => { if (i.teamName && i.logoUrl) logoMap[i.teamName] = i.logoUrl; });
-  const activeTournaments = tournaments.filter(t => t.status === "En curso" || t.status === "Abierto");
-  const palmares = tournaments.filter(t => t.winner && t.status === "Finalizado");
+
+  const activeTournaments = tournaments.filter(isTournamentActive);
+  const historyTournaments = tournaments.filter(t => !isTournamentActive(t));
+
+  // Filter history by month/year and search
+  const filteredHistory = historyTournaments.filter(t => {
+    const d = new Date(t.finishedAt || t.createdAt);
+    const monthMatch = d.getMonth() === histMonth && d.getFullYear() === histYear;
+    const searchMatch = !histSearch || t.name.toLowerCase().includes(histSearch.toLowerCase());
+    return monthMatch && searchMatch;
+  });
+
+  // Years that have tournaments in history
+  const availableYears = [...new Set(historyTournaments.map(t => new Date(t.finishedAt || t.createdAt).getFullYear()))].sort((a, b) => b - a);
 
   function TRow({ name, size = 22 }) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-        <TeamLogo name={name} logoUrl={logoMap[name]} size={size} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-      </span>
-    );
+    return <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}><TeamLogo name={name} logoUrl={logoMap[name]} size={size} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span></span>;
   }
 
-  function MatchRow({ m }) {
+  function TournamentCard({ t }) {
+    const isExpanded = expandedTId === t.id;
+    const hasGroups = t.groups?.length > 0;
+    const hasElim = t.eliminationRounds?.length > 0;
+    const schedule = t.matchdaySchedule || {};
+    const upcoming = Object.values(schedule).filter(d => d && new Date(d) > new Date()).sort()[0];
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontWeight: m.played && m.scoreA > m.scoreB ? 700 : 400 }}>
-          <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={22} />
-          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
+      <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "start", gap: 12, marginBottom: 12 }}>
+          <div style={{ width: 44, height: 44, background: "rgba(232,184,75,0.08)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎮</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
+            <p style={{ margin: "0 0 5px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
+            {upcoming && <p style={{ margin: "0 0 5px", fontSize: 12, color: C.blue }}>🕐 Próx. jornada: {formatDatetime(upcoming)}</p>}
+            {t.winner && <p style={{ margin: "0 0 5px", color: C.gold, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>🏆 <TRow name={t.winner} size={18} /></p>}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
+            </div>
+          </div>
         </div>
-        <div style={{ flexShrink: 0, minWidth: 48, textAlign: "center" }}>
-          {m.played
-            ? <span style={{ fontWeight: 700, fontSize: 15, color: C.gold, letterSpacing: 2 }}>{m.scoreA}–{m.scoreB}</span>
-            : <span style={{ fontSize: 11, color: C.faint }}>vs</span>}
+        <div style={{ display: "flex", gap: 8 }}>
+          {t.status === "Abierto" && <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={onLogin}>Inscribirse</button>}
+          {(hasGroups || hasElim) && <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Ver clasificación ▼"}</button>}
+          {t.whatsappLink && <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ ...S.btnInline("#25d366"), textDecoration: "none" }}>💬</a>}
         </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end", minWidth: 0, fontWeight: m.played && m.scoreB > m.scoreA ? 700 : 400 }}>
-          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span>
-          <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={22} />
-        </div>
+        {isExpanded && (
+          <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
+            {hasGroups && t.groups.map((g, gi) => (
+              <div key={gi} style={{ marginBottom: 16 }}>
+                <p style={{ ...S.sectionTitle, color: C.gold }}>Grupo {g.name}</p>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ minWidth: 240, marginBottom: 6 }}>
+                    <thead><tr>{["", "Equipo", "PJ", "PTS", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                    <tbody>{g.standings.map((s, si) => (
+                      <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}>
+                        <td style={{ ...S.td, color: C.faint, width: 24 }}>{si + 1}</td>
+                        <td style={S.td}><TRow name={s.name} size={20} /></td>
+                        <td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td>
+                        <td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td>
+                        <td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+            {hasElim && t.eliminationRounds.map((round, ri) => (
+              <div key={ri} style={{ marginBottom: 14 }}>
+                <p style={{ ...S.sectionTitle, color: C.gold }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
+                {round.matches.map((m, mi) => (
+                  <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 5 }}>
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}><TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={22} /><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span></div>
+                    <div style={{ minWidth: 50, textAlign: "center" }}>{m.matchStatus === "validado" ? <span style={{ fontWeight: 700, color: C.gold, fontSize: 14 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ color: C.faint, fontSize: 11 }}>pdte</span>}</div>
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end", minWidth: 0 }}><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span><TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={22} /></div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div style={{ ...S.wrap, paddingBottom: 0 }}>
+    <div style={S.wrap}>
       <style>{`*{box-sizing:border-box;}table{border-collapse:collapse;width:100%;}body{overscroll-behavior-y:contain;}`}</style>
 
-      {/* Top bar */}
-      <header style={S.topBar}>
+      <header style={{ ...S.topBar, borderBottomColor: "rgba(232,184,75,0.15)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#e8b84b,#c9952a)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: "#07090f" }}>⚔</div>
           <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.gold }}>TournamentOS</span>
@@ -86,169 +147,88 @@ export default function PublicPage({ onLogin }) {
       </header>
 
       <main style={S.main}>
-        {/* TORNEOS */}
+
         {tab === "torneos" && (
           <>
-            <div style={{ marginBottom: 20 }}>
-              <p style={S.pageTitle}>Torneos</p>
-              <p style={S.pageSubtitle}>FIFA Clubes Pro · {activeTournaments.length} activos</p>
+            {/* Sub tabs: activos / historial */}
+            <div style={{ display: "flex", gap: 0, marginBottom: 20, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, overflow: "hidden" }}>
+              {[["activos", `Torneos activos (${activeTournaments.length})`], ["historial", "Historial"]].map(([id, label]) => (
+                <button key={id} onClick={() => setTourneySubTab(id)} style={{ flex: 1, padding: "12px 8px", background: tourneySubTab === id ? "rgba(232,184,75,0.1)" : "transparent", border: "none", borderRight: id === "activos" ? "1px solid rgba(255,255,255,0.08)" : "none", color: tourneySubTab === id ? C.gold : C.muted, cursor: "pointer", fontSize: 12, fontWeight: tourneySubTab === id ? 700 : 400, fontFamily: "'Georgia',serif", letterSpacing: 1 }}>{label}</button>
+              ))}
             </div>
 
-            {activeTournaments.length === 0 ? (
-              <div style={{ ...S.card, textAlign: "center", padding: "48px 16px" }}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>🎮</div>
-                <p style={{ color: C.muted, marginBottom: 20 }}>No hay torneos activos</p>
-                <button style={S.btn(C.gold)} onClick={onLogin}>Regístrate para competir →</button>
-              </div>
-            ) : activeTournaments.map(t => {
-              const isExpanded = expandedTId === t.id;
-              const hasGroups = t.groups?.length > 0;
-              const hasElim = t.eliminationRounds?.length > 0;
-              return (
-                <div key={t.id} style={S.card}>
-                  <div style={{ display: "flex", alignItems: "start", gap: 12, marginBottom: 10 }}>
-                    <div style={{ width: 44, height: 44, background: "rgba(232,184,75,0.1)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎮</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
-                        <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
-                      </div>
-                      <p style={{ margin: 0, color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
-                      {t.description && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#7a8aa4" }}>{t.description}</p>}
-                    </div>
-                  </div>
+            {tourneySubTab === "activos" && (
+              activeTournaments.length === 0
+                ? <div style={{ ...S.card, textAlign: "center", padding: 48 }}><div style={{ fontSize: 40, marginBottom: 12 }}>🎮</div><p style={{ color: C.muted, marginBottom: 16 }}>No hay torneos activos ahora mismo</p><button style={S.btn(C.gold)} onClick={onLogin}>Regístrate para competir →</button></div>
+                : activeTournaments.map(t => <TournamentCard key={t.id} t={t} />)
+            )}
 
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {(hasGroups || hasElim) && (
-                      <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>
-                        {isExpanded ? "Ocultar ▲" : "Ver clasificación ▼"}
-                      </button>
-                    )}
-                    <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={onLogin}>Inscribirse</button>
+            {tourneySubTab === "historial" && (
+              <div>
+                {/* Filters */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <select style={{ ...S.select, padding: "10px 12px", fontSize: 14 }} value={histMonth} onChange={e => setHistMonth(+e.target.value)}>
+                      {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                    </select>
                   </div>
-
-                  {isExpanded && (
-                    <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
-                      {hasGroups && t.groups.map((g, gi) => (
-                        <div key={gi} style={{ marginBottom: 20 }}>
-                          <p style={{ ...S.sectionTitle, color: C.gold }}>Grupo {g.name}</p>
-                          <div style={{ overflowX: "auto", marginBottom: 10 }}>
-                            <table style={{ minWidth: 240 }}>
-                              <thead><tr>{["", "Equipo", "PJ", "PTS", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                              <tbody>
-                                {g.standings.map((s, si) => (
-                                  <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}>
-                                    <td style={{ ...S.td, color: C.faint, width: 24 }}>{si + 1}</td>
-                                    <td style={S.td}><TRow name={s.name} size={20} /></td>
-                                    <td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td>
-                                    <td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td>
-                                    <td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                          {g.matches.map((m, mi) => <MatchRow key={mi} m={m} />)}
-                        </div>
-                      ))}
-                      {hasElim && t.eliminationRounds.map((round, ri) => (
-                        <div key={ri} style={{ marginBottom: 16 }}>
-                          <p style={{ ...S.sectionTitle, color: C.gold }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
-                          {round.matches.map((m, mi) => (
-                            <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 6 }}>
-                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontWeight: m.winner === m.teamA ? 700 : 400, color: m.winner === m.teamA ? C.blue : C.text }}>
-                                <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={24} />
-                                <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
-                              </div>
-                              <div style={{ flexShrink: 0, minWidth: 50, textAlign: "center" }}>
-                                {m.winner ? <span style={{ fontWeight: 700, fontSize: 15, color: C.blue, letterSpacing: 2 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ fontSize: 11, color: C.faint }}>pdte</span>}
-                              </div>
-                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end", minWidth: 0, fontWeight: m.winner === m.teamB ? 700 : 400, color: m.winner === m.teamB ? C.blue : C.text }}>
-                                <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span>
-                                <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={24} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div style={{ width: 90 }}>
+                    <select style={{ ...S.select, padding: "10px 12px", fontSize: 14 }} value={histYear} onChange={e => setHistYear(+e.target.value)}>
+                      {(availableYears.length ? availableYears : [now.getFullYear()]).map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </div>
                 </div>
-              );
-            })}
+                <div style={{ marginBottom: 14 }}>
+                  <input style={{ ...S.input, fontSize: 14 }} placeholder="Buscar por nombre..." value={histSearch} onChange={e => setHistSearch(e.target.value)} />
+                </div>
+                {filteredHistory.length === 0
+                  ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay torneos en {MONTHS[histMonth]} {histYear}.</div>
+                  : filteredHistory.map(t => <TournamentCard key={t.id} t={t} />)
+                }
+              </div>
+            )}
           </>
         )}
 
-        {/* NOTICIAS */}
+        {tab === "partidos" && (
+          <>
+            <p style={S.pageTitle}>Partidos</p>
+            <p style={S.pageSubtitle}>Resultados en tiempo real</p>
+            <MatchesPanel tournaments={tournaments} inscriptions={inscriptions} currentUser={null} isAdmin={false} logoMap={logoMap} myTeamNames={new Set()} />
+          </>
+        )}
+
+        {tab === "ranking" && (
+          <>
+            <p style={S.pageTitle}>Ranking ELO</p>
+            <p style={S.pageSubtitle}>Clasificación histórica de equipos</p>
+            <RankingPanel myTeamId={null} />
+          </>
+        )}
+
         {tab === "noticias" && (
           <>
             <p style={S.pageTitle}>Noticias</p>
             <p style={S.pageSubtitle}>{news.length} publicaciones</p>
-            {news.length === 0
-              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay noticias publicadas.</div>
+            {news.length === 0 ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay noticias.</div>
               : news.map(n => (
                 <div key={n.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => setExpandedNews(expandedNews === n.id ? null : n.id)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8, marginBottom: 5 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
                         <span style={S.tag(catColor[n.category] || C.blue)}>{n.category}</span>
                         <span style={{ fontSize: 10, color: C.faint }}>{new Date(n.createdAt).toLocaleDateString("es-ES")}</span>
                       </div>
                       <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{n.title}</h3>
                     </div>
-                    <span style={{ color: C.faint, fontSize: 18, flexShrink: 0, marginTop: 2 }}>{expandedNews === n.id ? "▲" : "▼"}</span>
+                    <span style={{ color: C.faint, fontSize: 16, flexShrink: 0 }}>{expandedNews === n.id ? "▲" : "▼"}</span>
                   </div>
                   {expandedNews === n.id && <p style={{ margin: "10px 0 0", fontSize: 14, color: "#8a9ab4", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.body}</p>}
                 </div>
-              ))
-            }
+              ))}
           </>
         )}
 
-        {/* PALMARES */}
-        {tab === "palmares" && (
-          <>
-            <p style={S.pageTitle}>🏆 Palmarés</p>
-            <p style={S.pageSubtitle}>{palmares.length} torneos finalizados</p>
-            {palmares.length === 0
-              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Aún no hay torneos finalizados.</div>
-              : (
-                <>
-                  {(() => {
-                    const counts = {};
-                    palmares.forEach(t => { counts[t.winner] = (counts[t.winner] || 0) + 1; });
-                    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-                    return (
-                      <div style={{ ...S.card, marginBottom: 16 }}>
-                        <p style={{ ...S.label, marginBottom: 12 }}>Ranking de campeones</p>
-                        {sorted.map(([name, count], i) => (
-                          <div key={name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                            <span style={{ fontSize: i === 0 ? 20 : 14, color: i === 0 ? C.gold : C.faint, minWidth: 28, textAlign: "center" }}>{i === 0 ? "👑" : i + 1}</span>
-                            <TeamLogo name={name} logoUrl={logoMap[name]} size={34} />
-                            <span style={{ flex: 1, fontWeight: i === 0 ? 700 : 400, color: i === 0 ? C.gold : C.text, fontSize: 14 }}>{name}</span>
-                            <span style={{ color: C.gold, fontSize: 13 }}>{"🏆".repeat(Math.min(count, 4))} {count}</span>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                  {palmares.map(t => (
-                    <div key={t.id} style={{ ...S.card, display: "flex", alignItems: "center", gap: 14 }}>
-                      <TeamLogo name={t.winner} logoUrl={logoMap[t.winner]} size={44} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: 14, color: C.gold, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.winner}</p>
-                        <p style={{ margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</p>
-                        <p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{t.format} · {new Date(t.createdAt).toLocaleDateString("es-ES")}</p>
-                      </div>
-                      <span style={{ fontSize: 24, flexShrink: 0 }}>🏆</span>
-                    </div>
-                  ))}
-                </>
-              )}
-          </>
-        )}
-
-        {/* NORMATIVA */}
         {tab === "normativa" && (
           <>
             <p style={S.pageTitle}>Normativa</p>
@@ -259,9 +239,9 @@ export default function PublicPage({ onLogin }) {
                 <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.65 }}>{n.texto}</p>
               </div>
             ))}
-            <div style={{ ...S.card, background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.2)", marginTop: 20, textAlign: "center", padding: 24 }}>
-              <p style={{ margin: "0 0 14px", fontSize: 14, color: C.text }}>¿Listo para competir?</p>
-              <button style={S.btn(C.gold)} onClick={onLogin}>Regístrate ahora →</button>
+            <div style={{ ...S.card, background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", marginTop: 8, textAlign: "center", padding: 24 }}>
+              <p style={{ margin: "0 0 14px", fontSize: 14 }}>¿Listo para competir?</p>
+              <button style={S.btn(C.gold)} onClick={onLogin}>Registrarse ahora →</button>
             </div>
           </>
         )}

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, addDoc, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "firebase/firestore";
 import { useAuth } from "../AuthContext";
-import { C, S, statusColor, buildGroups, buildSeededElimination, buildEliminationRound, TeamLogo, BottomNav, formatDatetime, getRoundName } from "../shared.jsx";
+import { C, S, statusColor, buildGroups, buildSeededElimination, buildEliminationRound, TeamLogo, BottomNav, formatDatetime, getRoundName, isTournamentActive } from "../shared.jsx";
 import MatchesPanel, { collectMatchdays } from "./MatchesPanel.jsx";
 import RankingPanel from "./RankingPanel.jsx";
 
@@ -13,6 +13,8 @@ const TABS = [
   { id: "inscripciones", icon: "📝", label: "Inscripciones" },
   { id: "noticias", icon: "📰", label: "Noticias" },
 ];
+
+const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 export default function AdminDashboard({ onLogout }) {
   const { user, profile } = useAuth();
@@ -32,6 +34,12 @@ export default function AdminDashboard({ onLogout }) {
   const [scheduleEdits, setScheduleEdits] = useState({});
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // History filters
+  const now = new Date();
+  const [histMonth, setHistMonth] = useState(now.getMonth());
+  const [histYear, setHistYear] = useState(now.getFullYear());
+  const [histSearch, setHistSearch] = useState("");
+  const [tourneySubTab, setTourneySubTab] = useState("activos");
 
   function showNotif(msg) { setNotif(msg); setTimeout(() => setNotif(null), 3000); }
   function F(k, v) { setForm(p => ({ ...p, [k]: v })); }
@@ -53,23 +61,25 @@ export default function AdminDashboard({ onLogout }) {
   const logoMap = {};
   inscriptions.forEach(i => { if (i.teamName && i.logoUrl) logoMap[i.teamName] = i.logoUrl; });
   const pendingCount = inscriptions.filter(i => i.status === "pendiente").length;
-  const conflictCount = tournaments.flatMap(t => [
-    ...(t.groups || []).flatMap(g => g.matches || []),
-    ...(t.eliminationRounds || []).flatMap(r => r.matches || []),
-  ]).filter(m => m.matchStatus === "conflicto").length;
+  const conflictCount = tournaments.flatMap(t => [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])]).filter(m => m.matchStatus === "conflicto").length;
+  const navTabs = TABS.map(t => ({ ...t, badge: t.id === "inscripciones" ? pendingCount : t.id === "partidos" ? conflictCount : 0 }));
 
-  const navTabs = TABS.map(t => ({
-    ...t,
-    badge: t.id === "inscripciones" ? pendingCount : t.id === "partidos" ? conflictCount : 0,
-  }));
+  const activeTournaments = tournaments.filter(isTournamentActive);
+  const historyTournaments = tournaments.filter(t => !isTournamentActive(t));
+  const filteredHistory = historyTournaments.filter(t => {
+    const d = new Date(t.finishedAt || t.createdAt);
+    return d.getMonth() === histMonth && d.getFullYear() === histYear && (!histSearch || t.name.toLowerCase().includes(histSearch.toLowerCase()));
+  });
+  const availableYears = [...new Set(historyTournaments.map(t => new Date(t.finishedAt || t.createdAt).getFullYear()))].sort((a, b) => b - a);
+
+  // Only show inscriptions from active tournaments
+  const activeInscriptions = inscriptions.filter(i => {
+    const t = tournaments.find(t => t.id === i.tournamentId);
+    return t && isTournamentActive(t);
+  });
 
   function TRow({ name, size = 22 }) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-        <TeamLogo name={name} logoUrl={logoMap[name]} size={size} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-      </span>
-    );
+    return <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}><TeamLogo name={name} logoUrl={logoMap[name]} size={size} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span></span>;
   }
 
   async function createTournament() {
@@ -78,8 +88,7 @@ export default function AdminDashboard({ onLogout }) {
       name: form.name.trim(), description: form.description.trim(),
       sport: "FIFA Clubes Pro", format: form.format,
       groupCount: parseInt(form.groupCount), qualify: parseInt(form.qualify),
-      legs: parseInt(form.legs), whatsappLink: form.whatsappLink.trim(),
-      multiDate: form.multiDate,
+      legs: parseInt(form.legs), whatsappLink: form.whatsappLink.trim(), multiDate: form.multiDate,
       teams: [], groups: null, eliminationRounds: [], matchdaySchedule: {},
       status: "Abierto", winner: null,
       createdAt: new Date().toISOString(), createdBy: user.uid,
@@ -101,14 +110,10 @@ export default function AdminDashboard({ onLogout }) {
     showNotif("¡Torneo iniciado! ✓");
   }
 
-  // ── Reset tournament: clears brackets but keeps approved inscriptions ──
   async function resetTournament(t) {
-    if (!window.confirm(`¿Reiniciar "${t.name}"?\n\nSe borrarán todos los grupos, partidos y resultados.\nLas inscripciones aprobadas se conservan.`)) return;
+    if (!window.confirm(`¿Reiniciar "${t.name}"?\n\nSe borrarán grupos, partidos y resultados.\nLas inscripciones aprobadas se conservan.`)) return;
     setResetting(true);
-    await updateDoc(doc(db, "tournaments", t.id), {
-      teams: [], groups: null, eliminationRounds: [],
-      matchdaySchedule: {}, winner: null, status: "Abierto",
-    });
+    await updateDoc(doc(db, "tournaments", t.id), { teams: [], groups: null, eliminationRounds: [], matchdaySchedule: {}, winner: null, status: "Abierto" });
     setResetting(false);
     showNotif("Torneo reiniciado ✓ Los equipos inscritos se conservan");
   }
@@ -141,19 +146,34 @@ export default function AdminDashboard({ onLogout }) {
 
   async function saveNews() {
     if (!newsForm.title.trim() || !newsForm.body.trim()) return showNotif("Rellena título y contenido");
-    if (editingNewsId) {
-      await updateDoc(doc(db, "news", editingNewsId), { ...newsForm, updatedAt: new Date().toISOString() });
-      showNotif("Actualizada ✓");
-    } else {
-      await addDoc(collection(db, "news"), { ...newsForm, createdAt: new Date().toISOString(), createdBy: user.uid });
-      showNotif("Publicada ✓");
-    }
+    if (editingNewsId) { await updateDoc(doc(db, "news", editingNewsId), { ...newsForm, updatedAt: new Date().toISOString() }); showNotif("Actualizada ✓"); }
+    else { await addDoc(collection(db, "news"), { ...newsForm, createdAt: new Date().toISOString(), createdBy: user.uid }); showNotif("Publicada ✓"); }
     setNewsForm({ title: "", body: "", category: "Noticia" }); setEditingNewsId(null);
   }
 
   const activeTournament = tournaments.find(t => t.id === activeTId);
   const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
-  const scheduleMatchdays = activeTournament ? collectMatchdays([activeTournament], inscriptions) : [];
+  const scheduleMatchdays = activeTournament ? collectMatchdays([activeTournament]) : [];
+
+  function TournamentCard({ t, clickable = true }) {
+    const tInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "aprobada").length;
+    const tConflicts = [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])].filter(m => m.matchStatus === "conflicto").length;
+    return (
+      <div style={{ ...S.card, cursor: clickable ? "pointer" : "default" }} onClick={clickable ? () => { setActiveTId(t.id); setView("detail"); } : undefined}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ width: 40, height: 40, background: "rgba(79,142,247,0.1)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🎮</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {tConflicts > 0 && <span style={S.tag(C.red)}>⚠️ {tConflicts}</span>}
+            {t.multiDate && <span style={S.tag(C.purple)}>📅</span>}
+            <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
+          </div>
+        </div>
+        <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
+        <p style={{ margin: 0, color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {tInsc} equipos</p>
+        {t.winner && <p style={{ margin: "6px 0 0", color: C.gold, fontSize: 12 }}>🏆 {t.winner}</p>}
+      </div>
+    );
+  }
 
   return (
     <div style={S.wrap}>
@@ -167,7 +187,7 @@ export default function AdminDashboard({ onLogout }) {
             <div style={{ width: 80 }} />
           </div>
           <div style={{ padding: "24px 16px 40px" }}>
-            <p style={{ margin: "0 0 22px", color: C.muted, fontSize: 14 }}>{inscTarget.name}</p>
+            <p style={{ margin: "0 0 22px", color: C.muted }}>{inscTarget.name}</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div><label style={S.label}>Nombre del equipo *</label><input style={S.input} value={adminInscForm.teamName} onChange={e => setAdminInscForm(p => ({ ...p, teamName: e.target.value }))} /></div>
               <div><label style={S.label}>ID Manager</label><input style={S.input} value={adminInscForm.managerId} onChange={e => setAdminInscForm(p => ({ ...p, managerId: e.target.value }))} /></div>
@@ -183,9 +203,7 @@ export default function AdminDashboard({ onLogout }) {
 
       <header style={S.topBar}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {view !== "list" && tab === "torneos" && (
-            <button onClick={() => setView(view === "schedule" ? "detail" : "list")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 16, padding: "0 8px 0 0" }}>←</button>
-          )}
+          {view !== "list" && tab === "torneos" && <button onClick={() => setView(view === "schedule" ? "detail" : "list")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 16, padding: "0 8px 0 0" }}>←</button>}
           <div style={{ width: 28, height: 28, background: "linear-gradient(135deg,#4f8ef7,#2a6fd4)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>⚔</div>
           <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.blue }}>Admin</span>
         </div>
@@ -202,31 +220,39 @@ export default function AdminDashboard({ onLogout }) {
           <>
             {view === "list" && (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <div><p style={S.pageTitle}>Torneos</p><p style={S.pageSubtitle}>{tournaments.length} torneos</p></div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <p style={S.pageTitle}>Torneos</p>
                   <button style={{ ...S.btnInline(), flexShrink: 0 }} onClick={() => setView("new")}>+ Nuevo</button>
                 </div>
-                {tournaments.length === 0
-                  ? <div style={{ ...S.card, textAlign: "center", padding: 48, color: C.faint }}><div style={{ fontSize: 36, marginBottom: 12 }}>🎮</div>No hay torneos.</div>
-                  : tournaments.map(t => {
-                    const tConflicts = [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])].filter(m => m.matchStatus === "conflicto").length;
-                    const tInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "aprobada").length;
-                    return (
-                      <div key={t.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => { setActiveTId(t.id); setView("detail"); }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                          <div style={{ width: 40, height: 40, background: "rgba(79,142,247,0.1)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🎮</div>
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            {tConflicts > 0 && <span style={S.tag(C.red)}>⚠️ {tConflicts}</span>}
-                            {t.multiDate && <span style={S.tag(C.purple)}>Multi-fecha</span>}
-                            <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
-                          </div>
-                        </div>
-                        <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
-                        <p style={{ margin: 0, color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {tInsc} equipos</p>
-                      </div>
-                    );
-                  })
-                }
+
+                <div style={{ display: "flex", gap: 0, marginBottom: 16, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, overflow: "hidden" }}>
+                  {[["activos", `Activos (${activeTournaments.length})`], ["historial", "Historial"]].map(([id, label]) => (
+                    <button key={id} onClick={() => setTourneySubTab(id)} style={{ flex: 1, padding: "11px 8px", background: tourneySubTab === id ? "rgba(79,142,247,0.1)" : "transparent", border: "none", borderRight: id === "activos" ? "1px solid rgba(255,255,255,0.08)" : "none", color: tourneySubTab === id ? C.blue : C.muted, cursor: "pointer", fontSize: 12, fontWeight: tourneySubTab === id ? 700 : 400, fontFamily: "'Georgia',serif" }}>{label}</button>
+                  ))}
+                </div>
+
+                {tourneySubTab === "activos" && (
+                  activeTournaments.length === 0
+                    ? <div style={{ ...S.card, textAlign: "center", padding: 48, color: C.faint }}><div style={{ fontSize: 36, marginBottom: 12 }}>🎮</div>No hay torneos activos.</div>
+                    : activeTournaments.map(t => <TournamentCard key={t.id} t={t} />)
+                )}
+
+                {tourneySubTab === "historial" && (
+                  <div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                      <select style={{ ...S.select, flex: 1, padding: "10px 12px", fontSize: 14 }} value={histMonth} onChange={e => setHistMonth(+e.target.value)}>
+                        {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                      </select>
+                      <select style={{ ...S.select, width: 90, padding: "10px 12px", fontSize: 14 }} value={histYear} onChange={e => setHistYear(+e.target.value)}>
+                        {(availableYears.length ? availableYears : [now.getFullYear()]).map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    </div>
+                    <input style={{ ...S.input, marginBottom: 12, fontSize: 14 }} placeholder="Buscar por nombre..." value={histSearch} onChange={e => setHistSearch(e.target.value)} />
+                    {filteredHistory.length === 0
+                      ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay torneos en {MONTHS[histMonth]} {histYear}.</div>
+                      : filteredHistory.map(t => <TournamentCard key={t.id} t={t} />)}
+                  </div>
+                )}
               </>
             )}
 
@@ -238,53 +264,38 @@ export default function AdminDashboard({ onLogout }) {
                   <div><label style={S.label}>Nombre</label><input style={S.input} placeholder="Copa de Campeones 2026" value={form.name} onChange={e => F("name", e.target.value)} /></div>
                   <div><label style={S.label}>Descripción</label><input style={S.input} placeholder="Opcional..." value={form.description} onChange={e => F("description", e.target.value)} /></div>
                   <div><label style={S.label}>Enlace grupo WhatsApp</label><input style={S.input} placeholder="https://chat.whatsapp.com/..." value={form.whatsappLink} onChange={e => F("whatsappLink", e.target.value)} /></div>
-
                   <div>
                     <label style={S.label}>Formato</label>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {[["Liga", "🏆"], ["Eliminatoria", "⚔"], ["Grupos + Eliminatoria", "🎯"]].map(([f, icon]) => (
-                        <button key={f} onClick={() => F("format", f)} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${form.format === f ? C.blue : "rgba(255,255,255,0.09)"}`, background: form.format === f ? "rgba(79,142,247,0.1)" : "rgba(255,255,255,0.02)", color: form.format === f ? C.blue : C.muted, cursor: "pointer", fontSize: 14, fontFamily: "'Georgia',serif", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
-                          <span style={{ fontSize: 20 }}>{icon}</span> {f}
-                        </button>
-                      ))}
-                    </div>
+                    {[["Liga", "🏆"], ["Eliminatoria", "⚔"], ["Grupos + Eliminatoria", "🎯"]].map(([f, icon]) => (
+                      <button key={f} onClick={() => F("format", f)} style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: `1px solid ${form.format === f ? C.blue : "rgba(255,255,255,0.09)"}`, background: form.format === f ? "rgba(79,142,247,0.1)" : "rgba(255,255,255,0.02)", color: form.format === f ? C.blue : C.muted, cursor: "pointer", fontSize: 14, fontFamily: "'Georgia',serif", textAlign: "left", display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                        <span style={{ fontSize: 20 }}>{icon}</span> {f}
+                      </button>
+                    ))}
                   </div>
-
                   {(form.format === "Liga" || form.format === "Grupos + Eliminatoria") && (
                     <div>
                       <label style={S.label}>Vueltas</label>
                       <div style={{ display: "flex", gap: 10 }}>
                         {[[1, "⭕ Una vuelta"], [2, "🔄 Doble vuelta"]].map(([l, label]) => (
-                          <button key={l} onClick={() => F("legs", l)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.legs === l ? C.gold : "rgba(255,255,255,0.09)"}`, background: form.legs === l ? "rgba(232,184,75,0.1)" : "rgba(255,255,255,0.02)", color: form.legs === l ? C.gold : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>
-                            {label}
-                          </button>
+                          <button key={l} onClick={() => F("legs", l)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.legs === l ? C.gold : "rgba(255,255,255,0.09)"}`, background: form.legs === l ? "rgba(232,184,75,0.1)" : "rgba(255,255,255,0.02)", color: form.legs === l ? C.gold : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>{label}</button>
                         ))}
                       </div>
                     </div>
                   )}
-
                   {form.format === "Grupos + Eliminatoria" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <div><label style={S.label}>Nº grupos</label><input style={S.input} type="number" min={2} max={8} value={form.groupCount} onChange={e => F("groupCount", e.target.value)} /></div>
                       <div><label style={S.label}>Clasificados/grupo</label><input style={S.input} type="number" min={1} max={4} value={form.qualify} onChange={e => F("qualify", e.target.value)} /></div>
                     </div>
                   )}
-
-                  {/* Multi-date toggle */}
                   <div>
-                    <label style={S.label}>Duración del torneo</label>
+                    <label style={S.label}>Duración</label>
                     <div style={{ display: "flex", gap: 10 }}>
                       {[[false, "📅 Un solo día"], [true, "🗓 Varias fechas"]].map(([val, label]) => (
-                        <button key={String(val)} onClick={() => F("multiDate", val)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.multiDate === val ? C.purple : "rgba(255,255,255,0.09)"}`, background: form.multiDate === val ? "rgba(167,139,250,0.1)" : "rgba(255,255,255,0.02)", color: form.multiDate === val ? C.purple : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>
-                          {label}
-                        </button>
+                        <button key={String(val)} onClick={() => F("multiDate", val)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.multiDate === val ? C.purple : "rgba(255,255,255,0.09)"}`, background: form.multiDate === val ? "rgba(167,139,250,0.1)" : "rgba(255,255,255,0.02)", color: form.multiDate === val ? C.purple : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>{label}</button>
                       ))}
                     </div>
-                    <p style={{ margin: "8px 0 0", fontSize: 11, color: C.faint }}>
-                      {form.multiDate ? "Cada jornada puede jugarse en una fecha diferente" : "Todas las jornadas se juegan el mismo día"}
-                    </p>
                   </div>
-
                   <button style={S.btn()} onClick={createTournament}>Crear torneo →</button>
                 </div>
               </>
@@ -293,36 +304,19 @@ export default function AdminDashboard({ onLogout }) {
             {view === "schedule" && activeTournament && (
               <>
                 <p style={S.pageTitle}>Horario de jornadas</p>
-                <p style={S.pageSubtitle}>{activeTournament.name} {activeTournament.multiDate && "· Multi-fecha"}</p>
+                <p style={S.pageSubtitle}>{activeTournament.name}</p>
                 {scheduleMatchdays.length === 0
                   ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Inicia el torneo primero.</div>
                   : <>
-                    <div style={{ ...S.card, background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", marginBottom: 14 }}>
-                      <p style={{ margin: "0 0 4px", fontSize: 13, color: C.blue, fontWeight: 700 }}>ℹ La fecha/hora aplica a todos los partidos de esa jornada</p>
-                      <p style={{ margin: 0, fontSize: 12, color: C.muted }}>{activeTournament.multiDate ? "Cada jornada puede tener su propia fecha." : "Al ser torneo de un día, todas las jornadas deberían tener la misma fecha."}</p>
-                    </div>
                     {scheduleMatchdays.map(day => (
                       <div key={day.key} style={{ ...S.card, marginBottom: 8 }}>
-                        <div style={{ display: "flex", alignItems: "start", gap: 12 }}>
-                          <div style={{ flex: 1 }}>
-                            <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14 }}>
-                              {day.type === "group" ? `Jornada ${day.matchdayNum} · Grupo ${day.groupName}` : day.phase}
-                            </p>
-                            <p style={{ margin: "0 0 10px", color: C.muted, fontSize: 12 }}>{day.matches.length} partido{day.matches.length !== 1 ? "s" : ""}</p>
-                            <input type="datetime-local" value={scheduleEdits[day.schedKey] ? scheduleEdits[day.schedKey].slice(0, 16) : ""}
-                              onChange={e => setScheduleEdits(p => ({ ...p, [day.schedKey]: e.target.value ? new Date(e.target.value).toISOString() : null }))}
-                              style={{ ...S.input, fontSize: 15, padding: "11px 12px" }} />
-                            {scheduleEdits[day.schedKey] && <p style={{ margin: "6px 0 0", fontSize: 12, color: C.gold }}>🕐 {formatDatetime(scheduleEdits[day.schedKey])}</p>}
-                          </div>
-                          {scheduleEdits[day.schedKey] && (
-                            <button style={{ ...S.btnSm, color: C.red, borderColor: "rgba(247,111,111,0.3)", marginTop: 2 }} onClick={() => setScheduleEdits(p => { const n = { ...p }; delete n[day.schedKey]; return n; })}>✕</button>
-                          )}
-                        </div>
+                        <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14 }}>{day.type === "group" ? `Jornada ${day.matchdayNum} · Grupo ${day.groupName}` : day.phase}</p>
+                        <p style={{ margin: "0 0 10px", color: C.muted, fontSize: 12 }}>{day.matches.length} partido{day.matches.length !== 1 ? "s" : ""}</p>
+                        <input type="datetime-local" value={scheduleEdits[day.schedKey] ? scheduleEdits[day.schedKey].slice(0, 16) : ""} onChange={e => setScheduleEdits(p => ({ ...p, [day.schedKey]: e.target.value ? new Date(e.target.value).toISOString() : null }))} style={{ ...S.input, fontSize: 15, padding: "11px 12px" }} />
+                        {scheduleEdits[day.schedKey] && <p style={{ margin: "6px 0 0", fontSize: 12, color: C.gold }}>🕐 {formatDatetime(scheduleEdits[day.schedKey])}</p>}
                       </div>
                     ))}
-                    <button style={{ ...S.btn(), opacity: savingSchedule ? 0.6 : 1, marginTop: 8 }} onClick={saveSchedule} disabled={savingSchedule}>
-                      {savingSchedule ? "Guardando..." : "Guardar horarios →"}
-                    </button>
+                    <button style={{ ...S.btn(), opacity: savingSchedule ? 0.6 : 1, marginTop: 8 }} onClick={saveSchedule} disabled={savingSchedule}>{savingSchedule ? "Guardando..." : "Guardar horarios →"}</button>
                   </>
                 }
               </>
@@ -336,79 +330,46 @@ export default function AdminDashboard({ onLogout }) {
               const pendingInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "pendiente");
               const canStart = t.status === "Abierto" && approvedInsc.length >= 2 && !hasGroups && !hasElim;
               const canReset = hasGroups || hasElim || t.status !== "Abierto";
-
               return (
                 <div>
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
                       <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>{t.name}</h1>
                       <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
-                      {t.multiDate && <span style={S.tag(C.purple)}>Multi-fecha</span>}
+                      {t.multiDate && <span style={S.tag(C.purple)}>📅 Multi-fecha</span>}
                     </div>
-                    <p style={{ margin: "0 0 4px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {approvedInsc.length} equipos</p>
+                    <p style={{ margin: 0, color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {approvedInsc.length} equipos</p>
                     {t.winner && <p style={{ margin: "4px 0", color: C.gold }}>🏆 {t.winner}</p>}
                   </div>
 
-                  {/* WhatsApp link */}
+                  {/* WhatsApp */}
                   <div style={{ ...S.card, marginBottom: 12 }}>
                     <p style={{ ...S.label, marginBottom: 8 }}>Grupo de WhatsApp</p>
-                    {t.whatsappLink && (
-                      <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer"
-                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 8 }}>
-                        <span style={{ fontSize: 20 }}>💬</span>
-                        <span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Unirse al grupo</span>
-                        <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
-                      </a>
-                    )}
-                    <input style={{ ...S.input, fontSize: 14 }} placeholder="https://chat.whatsapp.com/..."
-                      defaultValue={t.whatsappLink || ""}
-                      onBlur={async e => { if (e.target.value !== (t.whatsappLink || "")) { await updateDoc(doc(db, "tournaments", t.id), { whatsappLink: e.target.value.trim() }); showNotif("Enlace actualizado ✓"); } }} />
+                    {t.whatsappLink && <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 8 }}><span style={{ fontSize: 20 }}>💬</span><span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Unirse</span><span style={{ marginLeft: "auto", color: C.faint }}>→</span></a>}
+                    <input style={{ ...S.input, fontSize: 14 }} placeholder="https://chat.whatsapp.com/..." defaultValue={t.whatsappLink || ""} onBlur={async e => { if (e.target.value !== (t.whatsappLink || "")) { await updateDoc(doc(db, "tournaments", t.id), { whatsappLink: e.target.value.trim() }); showNotif("Enlace actualizado ✓"); } }} />
                   </div>
 
                   {/* Actions */}
                   <div style={{ overflowX: "auto", marginBottom: 14 }}>
                     <div style={{ display: "flex", gap: 8, width: "max-content" }}>
-                      {["Abierto", "En curso", "Finalizado", "Cerrado"].map(s => (
-                        <button key={s} style={{ ...S.btnSm, borderColor: t.status === s ? statusColor[s] : undefined, color: t.status === s ? statusColor[s] : undefined }}
-                          onClick={() => updateDoc(doc(db, "tournaments", t.id), { status: s })}>{s}</button>
-                      ))}
+                      {["Abierto", "En curso", "Finalizado", "Cerrado"].map(s => <button key={s} style={{ ...S.btnSm, borderColor: t.status === s ? statusColor[s] : undefined, color: t.status === s ? statusColor[s] : undefined }} onClick={() => updateDoc(doc(db, "tournaments", t.id), { status: s, ...(s === "Finalizado" ? { finishedAt: new Date().toISOString() } : {}) })}>{s}</button>)}
                       <button style={{ ...S.btnSm, borderColor: "rgba(79,142,247,0.4)", color: C.blue }} onClick={() => { setInscTarget(t); setShowInscModal(true); }}>+ Equipo</button>
                       {(hasGroups || hasElim) && <button style={{ ...S.btnSm, borderColor: "rgba(232,184,75,0.4)", color: C.gold }} onClick={() => setView("schedule")}>🕐 Horarios</button>}
-                      {canReset && (
-                        <button style={{ ...S.btnSm, borderColor: "rgba(167,139,250,0.4)", color: C.purple, opacity: resetting ? 0.6 : 1 }} onClick={() => resetTournament(t)} disabled={resetting}>
-                          🔄 Reiniciar
-                        </button>
-                      )}
+                      {canReset && <button style={{ ...S.btnSm, borderColor: "rgba(167,139,250,0.4)", color: C.purple, opacity: resetting ? 0.6 : 1 }} onClick={() => resetTournament(t)} disabled={resetting}>🔄 Reiniciar</button>}
                       <button style={S.btnDanger} onClick={async () => { if (!window.confirm("¿Eliminar torneo?")) return; await deleteDoc(doc(db, "tournaments", t.id)); setView("list"); }}>Eliminar</button>
                     </div>
                   </div>
 
-                  {/* Reset info box */}
-                  {canReset && (
-                    <div style={{ background: "rgba(167,139,250,0.06)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
-                      <p style={{ margin: 0, fontSize: 12, color: C.purple }}>🔄 <strong>Reiniciar torneo</strong> borra grupos y resultados pero conserva las inscripciones. Útil para corregir la estructura de jornadas.</p>
-                    </div>
-                  )}
-
-                  {canStart && (
-                    <div style={{ background: "rgba(82,214,138,0.08)", border: "1px solid rgba(82,214,138,0.25)", borderRadius: 10, padding: 16, marginBottom: 14 }}>
-                      <p style={{ margin: "0 0 10px", color: C.green, fontSize: 13 }}>✓ {approvedInsc.length} equipos listos para iniciar</p>
-                      <button style={{ ...S.btn(C.green), color: "#07090f" }} onClick={() => startTournament(t)}>▶ Iniciar torneo</button>
-                    </div>
-                  )}
+                  {canStart && <div style={{ background: "rgba(82,214,138,0.08)", border: "1px solid rgba(82,214,138,0.25)", borderRadius: 10, padding: 16, marginBottom: 14 }}><p style={{ margin: "0 0 10px", color: C.green, fontSize: 13 }}>✓ {approvedInsc.length} equipos listos</p><button style={{ ...S.btn(C.green), color: "#07090f" }} onClick={() => startTournament(t)}>▶ Iniciar torneo</button></div>}
 
                   {pendingInsc.length > 0 && (
                     <div style={{ ...S.card, marginBottom: 14 }}>
-                      <p style={{ ...S.label, marginBottom: 12 }}>Solicitudes pendientes ({pendingInsc.length})</p>
+                      <p style={{ ...S.label, marginBottom: 12 }}>Pendientes ({pendingInsc.length})</p>
                       {pendingInsc.map(i => (
                         <div key={i.id} style={{ paddingBottom: 12, marginBottom: 12, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
                             <TeamLogo name={i.teamName} logoUrl={i.logoUrl} size={40} />
-                            <div>
-                              <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14 }}>{i.teamName}</p>
-                              <p style={{ margin: "0 0 1px", color: C.muted, fontSize: 12 }}>{i.userName}</p>
-                              <p style={{ margin: 0, color: C.faint, fontSize: 11 }}>📞 {i.phone || "—"} · ID: {i.managerId || "—"}</p>
-                            </div>
+                            <div><p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14 }}>{i.teamName}</p><p style={{ margin: "0 0 1px", color: C.muted, fontSize: 12 }}>{i.userName}</p><p style={{ margin: 0, color: C.faint, fontSize: 11 }}>📞 {i.phone || "—"} · ID: {i.managerId || "—"}</p></div>
                           </div>
                           <div style={{ display: "flex", gap: 8 }}>
                             <button style={{ ...S.btnSm, flex: 1, borderColor: "rgba(82,214,138,0.4)", color: C.green }} onClick={() => handleInscription(i.id, "aprobada")}>Aprobar</button>
@@ -422,12 +383,7 @@ export default function AdminDashboard({ onLogout }) {
                   {approvedInsc.length > 0 && !hasGroups && !hasElim && (
                     <div style={{ ...S.card, marginBottom: 14 }}>
                       <p style={{ ...S.label, marginBottom: 10 }}>Equipos aprobados ({approvedInsc.length})</p>
-                      {approvedInsc.map(i => (
-                        <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                          <TeamLogo name={i.teamName} logoUrl={i.logoUrl} size={32} />
-                          <div><p style={{ margin: "0 0 1px", fontWeight: 600, fontSize: 13 }}>{i.teamName}</p><p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{i.userName}</p></div>
-                        </div>
-                      ))}
+                      {approvedInsc.map(i => <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}><TeamLogo name={i.teamName} logoUrl={i.logoUrl} size={32} /><div><p style={{ margin: "0 0 1px", fontWeight: 600, fontSize: 13 }}>{i.teamName}</p><p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{i.userName}</p></div></div>)}
                     </div>
                   )}
 
@@ -440,30 +396,13 @@ export default function AdminDashboard({ onLogout }) {
                           <div style={{ overflowX: "auto" }}>
                             <table style={{ minWidth: 260 }}>
                               <thead><tr>{["#", "Equipo", "PJ", "PTS", "GF", "GC", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                              <tbody>
-                                {g.standings.map((s, si) => (
-                                  <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}>
-                                    <td style={{ ...S.td, color: C.faint }}>{si + 1}</td>
-                                    <td style={S.td}><TRow name={s.name} size={18} /></td>
-                                    <td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td>
-                                    <td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td>
-                                    <td style={{ ...S.td, textAlign: "center" }}>{s.gf}</td>
-                                    <td style={{ ...S.td, textAlign: "center" }}>{s.gc}</td>
-                                    <td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
+                              <tbody>{g.standings.map((s, si) => <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}><td style={{ ...S.td, color: C.faint }}>{si + 1}</td><td style={S.td}><TRow name={s.name} size={18} /></td><td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td><td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td><td style={{ ...S.td, textAlign: "center" }}>{s.gf}</td><td style={{ ...S.td, textAlign: "center" }}>{s.gc}</td><td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td></tr>)}</tbody>
                             </table>
                           </div>
                         </div>
                       ))}
                       {t.format === "Grupos + Eliminatoria" && t.groups.every(g => g.matches.every(m => m.matchStatus === "validado")) && !hasElim && (
-                        <button style={S.btn(C.gold)} onClick={async () => {
-                          const matches = buildSeededElimination(t.groups, t.qualify || 2);
-                          if (!matches.length) return showNotif("No hay suficientes clasificados");
-                          await updateDoc(doc(db, "tournaments", t.id), { eliminationRounds: [{ round: 1, matches }] });
-                          showNotif("Fase eliminatoria generada ✓");
-                        }}>Generar fase eliminatoria →</button>
+                        <button style={S.btn(C.gold)} onClick={async () => { const matches = buildSeededElimination(t.groups, t.qualify || 2); if (!matches.length) return showNotif("No hay suficientes clasificados"); await updateDoc(doc(db, "tournaments", t.id), { eliminationRounds: [{ round: 1, matches }] }); showNotif("Fase eliminatoria generada ✓"); }}>Generar fase eliminatoria →</button>
                       )}
                     </div>
                   )}
@@ -474,30 +413,14 @@ export default function AdminDashboard({ onLogout }) {
                       {t.eliminationRounds.map((round, ri) => (
                         <div key={ri} style={{ marginBottom: 10 }}>
                           <p style={{ ...S.label, color: C.gold, marginBottom: 6 }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
-                          {round.matches.map((m, mi) => (
-                            <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 5 }}>
-                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                                <TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={20} />
-                                <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span>
-                              </div>
-                              <div style={{ minWidth: 54, textAlign: "center" }}>
-                                {m.matchStatus === "validado"
-                                  ? <span style={{ fontWeight: 700, color: C.gold, fontSize: 14 }}>{m.scoreA}–{m.scoreB}</span>
-                                  : <span style={{ ...S.tag(m.matchStatus === "conflicto" ? C.red : m.matchStatus === "parcial" ? C.orange : C.muted), fontSize: 8 }}>{m.matchStatus || "pdte"}</span>}
-                              </div>
-                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", minWidth: 0 }}>
-                                <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span>
-                                <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={20} />
-                              </div>
-                            </div>
-                          ))}
+                          {round.matches.map((m, mi) => <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 5 }}><div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}><TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={20} /><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span></div><div style={{ minWidth: 54, textAlign: "center" }}>{m.matchStatus === "validado" ? <span style={{ fontWeight: 700, color: C.gold, fontSize: 14 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ ...S.tag(m.matchStatus === "conflicto" ? C.red : m.matchStatus === "parcial" ? C.orange : C.muted), fontSize: 8 }}>{m.matchStatus || "pdte"}</span>}</div><div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", minWidth: 0 }}><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span><TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={20} /></div></div>)}
                         </div>
                       ))}
                     </div>
                   )}
 
                   <div style={{ padding: "12px 14px", background: "rgba(79,142,247,0.06)", borderRadius: 10, border: "1px solid rgba(79,142,247,0.15)" }}>
-                    <p style={{ margin: "0 0 8px", fontSize: 12, color: C.blue }}>Los resultados se gestionan en la pestaña <strong>Partidos</strong></p>
+                    <p style={{ margin: "0 0 8px", fontSize: 12, color: C.blue }}>Los resultados se gestionan en <strong>Partidos</strong></p>
                     <button style={{ ...S.btnInline(C.blue) }} onClick={() => { setTab("partidos"); setView("list"); }}>Ir a Partidos →</button>
                   </div>
                 </div>
@@ -506,29 +429,17 @@ export default function AdminDashboard({ onLogout }) {
           </>
         )}
 
-        {tab === "partidos" && (
-          <>
-            <p style={S.pageTitle}>Partidos</p>
-            <p style={S.pageSubtitle}>Gestiona y valida resultados</p>
-            <MatchesPanel tournaments={tournaments} inscriptions={inscriptions} currentUser={user} isAdmin={true} logoMap={logoMap} />
-          </>
-        )}
+        {tab === "partidos" && (<><p style={S.pageTitle}>Partidos</p><p style={S.pageSubtitle}>Gestiona y valida resultados</p><MatchesPanel tournaments={tournaments} inscriptions={inscriptions} currentUser={user} isAdmin={true} logoMap={logoMap} myTeamNames={new Set()} /></>)}
 
-        {tab === "ranking" && (
-          <>
-            <p style={S.pageTitle}>Ranking ELO</p>
-            <p style={S.pageSubtitle}>Clasificación histórica de equipos</p>
-            <RankingPanel logoMap={logoMap} inscriptions={inscriptions} />
-          </>
-        )}
+        {tab === "ranking" && (<><p style={S.pageTitle}>Ranking ELO</p><p style={S.pageSubtitle}>Clasificación histórica de equipos</p><RankingPanel myTeamId={null} /></>)}
 
         {tab === "inscripciones" && (
           <>
             <p style={S.pageTitle}>Inscripciones</p>
-            <p style={S.pageSubtitle}>{inscriptions.length} total · {pendingCount} pendientes</p>
-            {inscriptions.length === 0
-              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay inscripciones.</div>
-              : inscriptions.map(i => {
+            <p style={S.pageSubtitle}>{activeInscriptions.length} en torneos activos · {pendingCount} pendientes</p>
+            {activeInscriptions.length === 0
+              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay inscripciones en torneos activos.</div>
+              : activeInscriptions.map(i => {
                 const tournament = tournaments.find(t => t.id === i.tournamentId);
                 return (
                   <div key={i.id} style={S.card}>
@@ -542,12 +453,7 @@ export default function AdminDashboard({ onLogout }) {
                       </div>
                       <span style={S.tag(i.status === "aprobada" ? C.green : i.status === "rechazada" ? C.red : C.gold)}>{i.status}</span>
                     </div>
-                    {i.status === "pendiente" && (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button style={{ ...S.btnSm, flex: 1, borderColor: "rgba(82,214,138,0.4)", color: C.green }} onClick={() => handleInscription(i.id, "aprobada")}>Aprobar</button>
-                        <button style={{ ...S.btnDanger, flex: 1 }} onClick={() => handleInscription(i.id, "rechazada")}>Rechazar</button>
-                      </div>
-                    )}
+                    {i.status === "pendiente" && <div style={{ display: "flex", gap: 8 }}><button style={{ ...S.btnSm, flex: 1, borderColor: "rgba(82,214,138,0.4)", color: C.green }} onClick={() => handleInscription(i.id, "aprobada")}>Aprobar</button><button style={{ ...S.btnDanger, flex: 1 }} onClick={() => handleInscription(i.id, "rechazada")}>Rechazar</button></div>}
                   </div>
                 );
               })
@@ -562,11 +468,7 @@ export default function AdminDashboard({ onLogout }) {
               <p style={{ ...S.label, color: C.gold, marginBottom: 14 }}>{editingNewsId ? "✏ Editando" : "+ Nueva"}</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div><label style={S.label}>Título</label><input style={S.input} value={newsForm.title} onChange={e => setNewsForm(p => ({ ...p, title: e.target.value }))} /></div>
-                <div><label style={S.label}>Categoría</label>
-                  <select style={S.select} value={newsForm.category} onChange={e => setNewsForm(p => ({ ...p, category: e.target.value }))}>
-                    <option>Noticia</option><option>Resultado</option><option>Convocatoria</option><option>Aviso</option>
-                  </select>
-                </div>
+                <div><label style={S.label}>Categoría</label><select style={S.select} value={newsForm.category} onChange={e => setNewsForm(p => ({ ...p, category: e.target.value }))}><option>Noticia</option><option>Resultado</option><option>Convocatoria</option><option>Aviso</option></select></div>
                 <div><label style={S.label}>Contenido</label><textarea style={S.textarea} value={newsForm.body} onChange={e => setNewsForm(p => ({ ...p, body: e.target.value }))} /></div>
                 <button style={S.btn()} onClick={saveNews}>{editingNewsId ? "Actualizar" : "Publicar"} →</button>
                 {editingNewsId && <button style={S.btnSm} onClick={() => { setEditingNewsId(null); setNewsForm({ title: "", body: "", category: "Noticia" }); }}>Cancelar</button>}
@@ -574,10 +476,7 @@ export default function AdminDashboard({ onLogout }) {
             </div>
             {news.map(n => (
               <div key={n.id} style={{ ...S.card, marginTop: 10 }}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
-                  <span style={S.tag(catColor[n.category] || C.blue)}>{n.category}</span>
-                  <span style={{ fontSize: 10, color: C.faint }}>{new Date(n.createdAt).toLocaleDateString("es-ES")}</span>
-                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 5, flexWrap: "wrap" }}><span style={S.tag(catColor[n.category] || C.blue)}>{n.category}</span><span style={{ fontSize: 10, color: C.faint }}>{new Date(n.createdAt).toLocaleDateString("es-ES")}</span></div>
                 <h3 style={{ margin: "0 0 5px", fontSize: 14, fontWeight: 700 }}>{n.title}</h3>
                 <p style={{ margin: "0 0 12px", fontSize: 12, color: "#7a8aa4" }}>{n.body.substring(0, 100)}{n.body.length > 100 ? "..." : ""}</p>
                 <div style={{ display: "flex", gap: 8 }}>
