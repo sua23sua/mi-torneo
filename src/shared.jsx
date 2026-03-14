@@ -1,6 +1,6 @@
 export const C = {
   blue: "#4f8ef7", gold: "#e8b84b", green: "#52d68a", red: "#f76f6f",
-  orange: "#f7934f",
+  orange: "#f7934f", purple: "#a78bfa",
   bg: "#07090f", card: "#0d1117", border: "rgba(255,255,255,0.06)",
   text: "#edf0f7", muted: "#5a6880", faint: "#2e3a4a",
 };
@@ -21,14 +21,32 @@ export function getRoundName(totalRounds, roundIdx) {
 
 export function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
 
+// ── ELO ──────────────────────────────────────────────────────────
+export const ELO_K = 32;
+export const ELO_DEFAULT = 1000;
+
+export function expectedScore(eloA, eloB) {
+  return 1 / (1 + Math.pow(10, (eloB - eloA) / 400));
+}
+
+export function calcEloChange(eloA, eloB, result) {
+  // result: 1=win, 0.5=draw, 0=loss (from A's perspective)
+  const expected = expectedScore(eloA, eloB);
+  return Math.round(ELO_K * (result - expected));
+}
+
+export function eloLabel(elo) {
+  if (elo >= 1400) return { label: "Élite", color: "#f7d060" };
+  if (elo >= 1250) return { label: "Oro", color: C.gold };
+  if (elo >= 1100) return { label: "Plata", color: "#94a3b8" };
+  if (elo >= 950) return { label: "Bronce", color: "#b87333" };
+  return { label: "Hierro", color: C.muted };
+}
+
 // ── Round-robin matchday algorithm ────────────────────────────────
-// Returns array of matchdays: [ [ {teamA, teamB}, ... ], ... ]
-// Uses the "circle method" to generate balanced rounds.
 function roundRobinMatchdays(teams) {
-  const n = teams.length;
   const list = [...teams];
-  // If odd number of teams, add a BYE
-  if (n % 2 !== 0) list.push("BYE");
+  if (list.length % 2 !== 0) list.push("BYE");
   const total = list.length;
   const rounds = total - 1;
   const matchdays = [];
@@ -40,7 +58,6 @@ function roundRobinMatchdays(teams) {
       if (a !== "BYE" && b !== "BYE") day.push({ teamA: a, teamB: b });
     }
     matchdays.push(day);
-    // Rotate all except first element
     t.splice(1, 0, t.pop());
   }
   return matchdays;
@@ -58,31 +75,26 @@ export function makeMatch(teamA, teamB, leg = 1, matchday = 1) {
 export function makeElimMatch(teamA, teamB) {
   return {
     teamA, teamB,
-    scoreA: null, scoreB: null,
-    winner: null, reportByA: null, reportByB: null,
-    matchStatus: "pendiente",
+    scoreA: null, scoreB: null, winner: null,
+    reportByA: null, reportByB: null, matchStatus: "pendiente",
   };
 }
 
-// Build groups with matchdays assigned to each match
 export function buildGroups(teams, groupCount, legs = 1) {
   const shuffled = shuffle(teams);
   const groups = Array.from({ length: groupCount }, (_, i) => ({
     name: String.fromCharCode(65 + i), teams: [], matches: [], standings: [], legs,
   }));
   shuffled.forEach((t, i) => groups[i % groupCount].teams.push(t));
-
   groups.forEach((g) => {
     g.standings = g.teams.map((t) => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 }));
     const days = roundRobinMatchdays(g.teams);
     const matches = [];
-    // Leg 1
     days.forEach((day, di) => {
       day.forEach(({ teamA, teamB }) => {
         matches.push(makeMatch(teamA, teamB, 1, di + 1));
       });
     });
-    // Leg 2 — reverse fixtures, offset matchday numbers
     if (legs === 2) {
       days.forEach((day, di) => {
         day.forEach(({ teamA, teamB }) => {
@@ -91,10 +103,8 @@ export function buildGroups(teams, groupCount, legs = 1) {
       });
     }
     g.matches = matches;
-    // Total matchdays in this group
     g.totalMatchdays = legs === 2 ? days.length * 2 : days.length;
   });
-
   return groups;
 }
 
@@ -152,7 +162,6 @@ export function computeMatchStatus(match, side, scoreA, scoreB) {
   return "conflicto";
 }
 
-// Format a datetime string nicely in Spanish
 export function formatDatetime(iso) {
   if (!iso) return null;
   try {
@@ -161,6 +170,10 @@ export function formatDatetime(iso) {
       hour: "2-digit", minute: "2-digit",
     });
   } catch { return iso; }
+}
+
+export function normalizeTeamName(name) {
+  return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 }
 
 export function TeamLogo({ name, logoUrl, size = 28 }) {
@@ -182,6 +195,19 @@ export function TeamLogo({ name, logoUrl, size = 28 }) {
       fontFamily: "'Georgia',serif",
     }}>
       {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+export function EloBar({ elo }) {
+  const pct = Math.min(100, Math.max(0, ((elo - 600) / 900) * 100));
+  const { label, color } = eloLabel(elo);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, transition: "width .4s" }} />
+      </div>
+      <span style={{ fontSize: 10, color, letterSpacing: 1, whiteSpace: "nowrap" }}>{elo} · {label}</span>
     </div>
   );
 }

@@ -3,8 +3,9 @@ import { db, storage } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "../AuthContext";
-import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime } from "../shared.jsx";
+import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, EloBar, eloLabel } from "../shared.jsx";
 import MatchesPanel from "./MatchesPanel.jsx";
+import RankingPanel from "./RankingPanel.jsx";
 
 const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
 
@@ -22,7 +23,7 @@ const NORMATIVA = [
 const TABS = [
   { id: "torneos", icon: "🎮", label: "Torneos" },
   { id: "partidos", icon: "⚽", label: "Partidos" },
-  { id: "noticias", icon: "📰", label: "Noticias" },
+  { id: "ranking", icon: "📊", label: "Ranking" },
   { id: "mis", icon: "👤", label: "Mi equipo" },
   { id: "normativa", icon: "📋", label: "Normas" },
 ];
@@ -59,6 +60,20 @@ export default function UserDashboard({ onLogout }) {
   const logoMap = {};
   allInscriptions.forEach(i => { if (i.teamName && i.logoUrl) logoMap[i.teamName] = i.logoUrl; });
 
+  // Pre-fill inscription form with user's registered team
+  function openInscModal(t) {
+    setSelectedTournament(t);
+    setInscForm({
+      teamName: profile?.teamName || "",
+      managerId: "",
+      phone: "",
+      twitter: "",
+      logoFile: null,
+      logoPreview: profile?.teamLogo || null,
+    });
+    setShowModal(true);
+  }
+
   function handleLogoChange(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -72,7 +87,7 @@ export default function UserDashboard({ onLogout }) {
     if (!inscForm.phone.trim()) return showNotif("Introduce un teléfono de contacto");
     if (myInscriptions.find(i => i.tournamentId === selectedTournament.id)) return showNotif("Ya estás inscrito");
     setUploading(true);
-    let logoUrl = null;
+    let logoUrl = inscForm.logoPreview && !inscForm.logoFile ? inscForm.logoPreview : null;
     try {
       if (inscForm.logoFile) {
         const storageRef = ref(storage, `escudos/${user.uid}_${Date.now()}_${inscForm.logoFile.name}`);
@@ -86,7 +101,6 @@ export default function UserDashboard({ onLogout }) {
         phone: inscForm.phone.trim(), twitter: inscForm.twitter.trim(),
         logoUrl, status: "pendiente", createdAt: new Date().toISOString(),
       });
-      setInscForm({ teamName: "", managerId: "", phone: "", twitter: "", logoFile: null, logoPreview: null });
       setShowModal(false);
       showNotif("Solicitud enviada ✓");
     } catch (e) { showNotif("Error al enviar. Inténtalo de nuevo."); }
@@ -105,13 +119,15 @@ export default function UserDashboard({ onLogout }) {
   const myTeamNames = new Set(myInscriptions.filter(i => i.status === "aprobada").map(i => i.teamName));
   const pendingMyMatches = tournaments.flatMap(t => {
     if (t.status !== "En curso") return [];
-    return [
-      ...(t.groups || []).flatMap(g => g.matches || []),
-      ...(t.eliminationRounds || []).flatMap(r => r.matches || []),
-    ].filter(m => (myTeamNames.has(m.teamA) || myTeamNames.has(m.teamB)) && (m.matchStatus || "pendiente") !== "validado");
+    return [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])]
+      .filter(m => (myTeamNames.has(m.teamA) || myTeamNames.has(m.teamB)) && (m.matchStatus || "pendiente") !== "validado");
   }).length;
 
   const navTabs = TABS.map(t => ({ ...t, badge: t.id === "partidos" && pendingMyMatches > 0 ? pendingMyMatches : 0 }));
+
+  const myElo = profile?.elo ?? 1000;
+  const myStats = profile?.stats || { pj: 0, pg: 0, pe: 0, pp: 0, titulos: 0 };
+  const { label: eloTier, color: eloColor } = eloLabel(myElo);
 
   return (
     <div style={S.wrap}>
@@ -119,7 +135,6 @@ export default function UserDashboard({ onLogout }) {
         <div style={{ position: "fixed", top: 16, left: 16, right: 16, background: C.gold, color: "#07090f", padding: "13px 16px", zIndex: 1000, fontSize: 13, fontFamily: "'Georgia',serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", borderRadius: 10, textAlign: "center", fontWeight: 600 }}>{notif}</div>
       )}
 
-      {/* Inscription Modal */}
       {showModal && selectedTournament && (
         <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 300, overflowY: "auto", display: "flex", flexDirection: "column" }}>
           <div style={{ ...S.topBar, position: "relative", flexShrink: 0 }}>
@@ -128,12 +143,12 @@ export default function UserDashboard({ onLogout }) {
             <div style={{ width: 80 }} />
           </div>
           <div style={{ padding: "24px 16px 40px", flex: 1 }}>
-            <p style={{ margin: "0 0 6px", color: C.muted, fontSize: 14 }}>{selectedTournament.name}</p>
+            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 15 }}>{selectedTournament.name}</p>
             {selectedTournament.whatsappLink && (
               <a href={selectedTournament.whatsappLink} target="_blank" rel="noopener noreferrer"
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 20 }}>
                 <span style={{ fontSize: 18 }}>💬</span>
-                <span style={{ fontSize: 13, color: "#25d366", fontWeight: 600 }}>Unirse al grupo de WhatsApp del torneo</span>
+                <span style={{ fontSize: 13, color: "#25d366", fontWeight: 600 }}>Unirse al grupo de WhatsApp</span>
                 <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
               </a>
             )}
@@ -145,10 +160,7 @@ export default function UserDashboard({ onLogout }) {
                   : <div style={{ width: 64, height: 64, borderRadius: "50%", border: "2px dashed rgba(232,184,75,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, background: "rgba(232,184,75,0.04)", flexShrink: 0 }}>🛡</div>
                 }
                 <div>
-                  <label>
-                    <input type="file" accept="image/*" onChange={handleLogoChange} style={{ display: "none" }} />
-                    <span style={{ ...S.btnSm, display: "inline-block", marginBottom: 8 }}>Subir escudo</span>
-                  </label>
+                  <label><input type="file" accept="image/*" onChange={handleLogoChange} style={{ display: "none" }} /><span style={{ ...S.btnSm, display: "inline-block", marginBottom: 8 }}>Subir escudo</span></label>
                   <p style={{ margin: 0, fontSize: 11, color: C.faint }}>PNG o JPG · máx 2MB</p>
                 </div>
               </div>
@@ -192,11 +204,8 @@ export default function UserDashboard({ onLogout }) {
                 const isExpanded = expandedTId === t.id;
                 const hasGroups = t.groups?.length > 0;
                 const hasElim = t.eliminationRounds?.length > 0;
-
-                // Next scheduled matchday
                 const schedule = t.matchdaySchedule || {};
                 const upcoming = Object.values(schedule).filter(d => d && new Date(d) > new Date()).sort()[0];
-
                 return (
                   <div key={t.id} style={S.card}>
                     <div style={{ display: "flex", alignItems: "start", gap: 12, marginBottom: 12 }}>
@@ -213,26 +222,22 @@ export default function UserDashboard({ onLogout }) {
                         </div>
                       </div>
                     </div>
-
-                    {/* WhatsApp group link */}
                     {t.whatsappLink && myInsc?.status === "aprobada" && (
                       <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer"
                         style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.07)", border: "1px solid rgba(37,211,102,0.18)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 10 }}>
                         <span style={{ fontSize: 16 }}>💬</span>
-                        <span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp del torneo</span>
+                        <span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp</span>
                         <span style={{ marginLeft: "auto", color: C.faint, fontSize: 14 }}>→</span>
                       </a>
                     )}
-
                     <div style={{ display: "flex", gap: 8 }}>
                       {!myInsc && t.status === "Abierto" && (
-                        <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={() => { setSelectedTournament(t); setShowModal(true); }}>Inscribirse</button>
+                        <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={() => openInscModal(t)}>Inscribirse</button>
                       )}
                       {(hasGroups || hasElim) && (
                         <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Clasificación ▼"}</button>
                       )}
                     </div>
-
                     {isExpanded && (
                       <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
                         {hasGroups && t.groups.map((g, gi) => (
@@ -292,35 +297,47 @@ export default function UserDashboard({ onLogout }) {
           </>
         )}
 
-        {tab === "noticias" && (
+        {tab === "ranking" && (
           <>
-            <p style={S.pageTitle}>Noticias</p>
-            <p style={S.pageSubtitle}>{news.length} publicaciones</p>
-            {news.length === 0
-              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay noticias.</div>
-              : news.map(n => (
-                <div key={n.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => setExpandedNews(expandedNews === n.id ? null : n.id)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8, marginBottom: 5 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
-                        <span style={S.tag(catColor[n.category] || C.blue)}>{n.category}</span>
-                        <span style={{ fontSize: 10, color: C.faint }}>{new Date(n.createdAt).toLocaleDateString("es-ES")}</span>
-                      </div>
-                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{n.title}</h3>
-                    </div>
-                    <span style={{ color: C.faint, fontSize: 16, flexShrink: 0 }}>{expandedNews === n.id ? "▲" : "▼"}</span>
+            <p style={S.pageTitle}>Ranking ELO</p>
+            <p style={S.pageSubtitle}>Clasificación histórica de equipos</p>
+            {/* My ELO card */}
+            {myStats.pj > 0 && (
+              <div style={{ ...S.card, marginBottom: 20, borderColor: "rgba(167,139,250,0.2)", background: "rgba(167,139,250,0.04)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                  <TeamLogo name={profile?.teamName || profile?.name} logoUrl={logoMap[profile?.teamName]} size={44} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 15 }}>{profile?.teamName || profile?.name}</p>
+                    <p style={{ margin: "0 0 6px", fontSize: 11, color: C.muted }}>Tu equipo</p>
+                    <EloBar elo={myElo} />
                   </div>
-                  {expandedNews === n.id && <p style={{ margin: "10px 0 0", fontSize: 14, color: "#8a9ab4", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.body}</p>}
                 </div>
-              ))
-            }
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                  {[["PJ", myStats.pj], ["V", myStats.pg, C.green], ["E", myStats.pe, C.gold], ["D", myStats.pp, C.red]].map(([label, val, color]) => (
+                    <div key={label} style={{ textAlign: "center", padding: "10px 4px", background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
+                      <p style={{ margin: "0 0 2px", fontSize: 18, fontWeight: 700, color: color || C.text }}>{val}</p>
+                      <p style={{ margin: 0, fontSize: 10, color: C.faint, letterSpacing: 1 }}>{label}</p>
+                    </div>
+                  ))}
+                </div>
+                {myStats.titulos > 0 && (
+                  <p style={{ margin: "10px 0 0", fontSize: 13, color: C.gold, textAlign: "center" }}>{"🏆".repeat(Math.min(myStats.titulos, 5))} {myStats.titulos} título{myStats.titulos !== 1 ? "s" : ""}</p>
+                )}
+                {profile?.lastEloChange != null && (
+                  <p style={{ margin: "6px 0 0", fontSize: 12, color: profile.lastEloChange >= 0 ? C.green : C.red, textAlign: "center" }}>
+                    Último partido: {profile.lastEloChange > 0 ? "+" : ""}{profile.lastEloChange} ELO
+                  </p>
+                )}
+              </div>
+            )}
+            <RankingPanel logoMap={logoMap} inscriptions={allInscriptions} />
           </>
         )}
 
         {tab === "mis" && (
           <>
             <p style={S.pageTitle}>Mi equipo</p>
-            <p style={S.pageSubtitle}>Tus inscripciones</p>
+            <p style={S.pageSubtitle}>Tus inscripciones y torneos</p>
             {myInscriptions.length === 0
               ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Aún no te has inscrito.</div>
               : myInscriptions.map(i => {

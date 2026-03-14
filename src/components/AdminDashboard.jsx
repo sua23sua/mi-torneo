@@ -4,10 +4,12 @@ import { collection, addDoc, doc, updateDoc, deleteDoc, query, orderBy, onSnapsh
 import { useAuth } from "../AuthContext";
 import { C, S, statusColor, buildGroups, buildSeededElimination, buildEliminationRound, TeamLogo, BottomNav, formatDatetime, getRoundName } from "../shared.jsx";
 import MatchesPanel, { collectMatchdays } from "./MatchesPanel.jsx";
+import RankingPanel from "./RankingPanel.jsx";
 
 const TABS = [
   { id: "torneos", icon: "🎮", label: "Torneos" },
   { id: "partidos", icon: "⚽", label: "Partidos" },
+  { id: "ranking", icon: "📊", label: "Ranking" },
   { id: "inscripciones", icon: "📝", label: "Inscripciones" },
   { id: "noticias", icon: "📰", label: "Noticias" },
 ];
@@ -18,20 +20,20 @@ export default function AdminDashboard({ onLogout }) {
   const [tournaments, setTournaments] = useState([]);
   const [inscriptions, setInscriptions] = useState([]);
   const [news, setNews] = useState([]);
-  const [view, setView] = useState("list"); // list | new | detail | schedule
+  const [view, setView] = useState("list");
   const [activeTId, setActiveTId] = useState(null);
   const [notif, setNotif] = useState(null);
   const [newsForm, setNewsForm] = useState({ title: "", body: "", category: "Noticia" });
   const [editingNewsId, setEditingNewsId] = useState(null);
-  const [form, setForm] = useState({ name: "", format: "Liga", groupCount: 2, qualify: 2, description: "", legs: 1, whatsappLink: "" });
+  const [form, setForm] = useState({ name: "", format: "Liga", groupCount: 2, qualify: 2, description: "", legs: 1, whatsappLink: "", multiDate: false });
   const [showInscModal, setShowInscModal] = useState(false);
   const [inscTarget, setInscTarget] = useState(null);
   const [adminInscForm, setAdminInscForm] = useState({ teamName: "", managerId: "", phone: "", twitter: "" });
-  // Schedule editing: local copy of matchdaySchedule {key: ISO}
   const [scheduleEdits, setScheduleEdits] = useState({});
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
-  function showNotif(msg) { setNotif(msg); setTimeout(() => setNotif(null), 2800); }
+  function showNotif(msg) { setNotif(msg); setTimeout(() => setNotif(null), 3000); }
   function F(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
   useEffect(() => {
@@ -41,7 +43,6 @@ export default function AdminDashboard({ onLogout }) {
     return () => { u1(); u2(); u3(); };
   }, []);
 
-  // When entering schedule view, pre-fill existing schedule
   useEffect(() => {
     if (view === "schedule" && activeTId) {
       const t = tournaments.find(t => t.id === activeTId);
@@ -78,11 +79,12 @@ export default function AdminDashboard({ onLogout }) {
       sport: "FIFA Clubes Pro", format: form.format,
       groupCount: parseInt(form.groupCount), qualify: parseInt(form.qualify),
       legs: parseInt(form.legs), whatsappLink: form.whatsappLink.trim(),
+      multiDate: form.multiDate,
       teams: [], groups: null, eliminationRounds: [], matchdaySchedule: {},
       status: "Abierto", winner: null,
       createdAt: new Date().toISOString(), createdBy: user.uid,
     });
-    setForm({ name: "", format: "Liga", groupCount: 2, qualify: 2, description: "", legs: 1, whatsappLink: "" });
+    setForm({ name: "", format: "Liga", groupCount: 2, qualify: 2, description: "", legs: 1, whatsappLink: "", multiDate: false });
     setView("list"); showNotif("Torneo creado ✓");
   }
 
@@ -97,6 +99,18 @@ export default function AdminDashboard({ onLogout }) {
     else groups = buildGroups(teamNames, Math.min(parseInt(t.groupCount), Math.floor(teamNames.length / 2)), legs);
     await updateDoc(doc(db, "tournaments", t.id), { teams: teamNames, groups, eliminationRounds, status: "En curso" });
     showNotif("¡Torneo iniciado! ✓");
+  }
+
+  // ── Reset tournament: clears brackets but keeps approved inscriptions ──
+  async function resetTournament(t) {
+    if (!window.confirm(`¿Reiniciar "${t.name}"?\n\nSe borrarán todos los grupos, partidos y resultados.\nLas inscripciones aprobadas se conservan.`)) return;
+    setResetting(true);
+    await updateDoc(doc(db, "tournaments", t.id), {
+      teams: [], groups: null, eliminationRounds: [],
+      matchdaySchedule: {}, winner: null, status: "Abierto",
+    });
+    setResetting(false);
+    showNotif("Torneo reiniciado ✓ Los equipos inscritos se conservan");
   }
 
   async function saveSchedule() {
@@ -139,8 +153,6 @@ export default function AdminDashboard({ onLogout }) {
 
   const activeTournament = tournaments.find(t => t.id === activeTId);
   const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
-
-  // Build matchday list for schedule editor
   const scheduleMatchdays = activeTournament ? collectMatchdays([activeTournament], inscriptions) : [];
 
   return (
@@ -167,11 +179,11 @@ export default function AdminDashboard({ onLogout }) {
         </div>
       )}
 
-      <style>{`*{box-sizing:border-box;}input:focus,select:focus,textarea:focus{outline:none;border-color:#4f8ef7!important;}input[type="datetime-local"]:focus{border-color:#e8b84b!important;}input::placeholder,textarea::placeholder{color:rgba(200,212,228,0.18)!important;}table{border-collapse:collapse;width:100%;}body{overscroll-behavior-y:contain;}`}</style>
+      <style>{`*{box-sizing:border-box;}input:focus,select:focus,textarea:focus{outline:none;border-color:#4f8ef7!important;}input[type="datetime-local"]{color-scheme:dark;}input::placeholder,textarea::placeholder{color:rgba(200,212,228,0.18)!important;}table{border-collapse:collapse;width:100%;}body{overscroll-behavior-y:contain;}`}</style>
 
       <header style={S.topBar}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {(view !== "list") && tab === "torneos" && (
+          {view !== "list" && tab === "torneos" && (
             <button onClick={() => setView(view === "schedule" ? "detail" : "list")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 16, padding: "0 8px 0 0" }}>←</button>
           )}
           <div style={{ width: 28, height: 28, background: "linear-gradient(135deg,#4f8ef7,#2a6fd4)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>⚔</div>
@@ -188,7 +200,6 @@ export default function AdminDashboard({ onLogout }) {
         {/* ══ TORNEOS ══ */}
         {tab === "torneos" && (
           <>
-            {/* LIST */}
             {view === "list" && (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -198,17 +209,15 @@ export default function AdminDashboard({ onLogout }) {
                 {tournaments.length === 0
                   ? <div style={{ ...S.card, textAlign: "center", padding: 48, color: C.faint }}><div style={{ fontSize: 36, marginBottom: 12 }}>🎮</div>No hay torneos.</div>
                   : tournaments.map(t => {
-                    const tConflicts = [
-                      ...(t.groups || []).flatMap(g => g.matches || []),
-                      ...(t.eliminationRounds || []).flatMap(r => r.matches || []),
-                    ].filter(m => m.matchStatus === "conflicto").length;
+                    const tConflicts = [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])].filter(m => m.matchStatus === "conflicto").length;
                     const tInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "aprobada").length;
                     return (
                       <div key={t.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => { setActiveTId(t.id); setView("detail"); }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
                           <div style={{ width: 40, height: 40, background: "rgba(79,142,247,0.1)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🎮</div>
-                          <div style={{ display: "flex", gap: 6 }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                             {tConflicts > 0 && <span style={S.tag(C.red)}>⚠️ {tConflicts}</span>}
+                            {t.multiDate && <span style={S.tag(C.purple)}>Multi-fecha</span>}
                             <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
                           </div>
                         </div>
@@ -221,7 +230,6 @@ export default function AdminDashboard({ onLogout }) {
               </>
             )}
 
-            {/* NEW */}
             {view === "new" && (
               <>
                 <p style={S.pageTitle}>Nuevo torneo</p>
@@ -229,10 +237,8 @@ export default function AdminDashboard({ onLogout }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                   <div><label style={S.label}>Nombre</label><input style={S.input} placeholder="Copa de Campeones 2026" value={form.name} onChange={e => F("name", e.target.value)} /></div>
                   <div><label style={S.label}>Descripción</label><input style={S.input} placeholder="Opcional..." value={form.description} onChange={e => F("description", e.target.value)} /></div>
-                  <div>
-                    <label style={S.label}>Enlace grupo WhatsApp (opcional)</label>
-                    <input style={S.input} placeholder="https://chat.whatsapp.com/..." value={form.whatsappLink} onChange={e => F("whatsappLink", e.target.value)} />
-                  </div>
+                  <div><label style={S.label}>Enlace grupo WhatsApp</label><input style={S.input} placeholder="https://chat.whatsapp.com/..." value={form.whatsappLink} onChange={e => F("whatsappLink", e.target.value)} /></div>
+
                   <div>
                     <label style={S.label}>Formato</label>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -243,6 +249,7 @@ export default function AdminDashboard({ onLogout }) {
                       ))}
                     </div>
                   </div>
+
                   {(form.format === "Liga" || form.format === "Grupos + Eliminatoria") && (
                     <div>
                       <label style={S.label}>Vueltas</label>
@@ -255,72 +262,72 @@ export default function AdminDashboard({ onLogout }) {
                       </div>
                     </div>
                   )}
+
                   {form.format === "Grupos + Eliminatoria" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <div><label style={S.label}>Nº grupos</label><input style={S.input} type="number" min={2} max={8} value={form.groupCount} onChange={e => F("groupCount", e.target.value)} /></div>
                       <div><label style={S.label}>Clasificados/grupo</label><input style={S.input} type="number" min={1} max={4} value={form.qualify} onChange={e => F("qualify", e.target.value)} /></div>
                     </div>
                   )}
+
+                  {/* Multi-date toggle */}
+                  <div>
+                    <label style={S.label}>Duración del torneo</label>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      {[[false, "📅 Un solo día"], [true, "🗓 Varias fechas"]].map(([val, label]) => (
+                        <button key={String(val)} onClick={() => F("multiDate", val)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.multiDate === val ? C.purple : "rgba(255,255,255,0.09)"}`, background: form.multiDate === val ? "rgba(167,139,250,0.1)" : "rgba(255,255,255,0.02)", color: form.multiDate === val ? C.purple : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p style={{ margin: "8px 0 0", fontSize: 11, color: C.faint }}>
+                      {form.multiDate ? "Cada jornada puede jugarse en una fecha diferente" : "Todas las jornadas se juegan el mismo día"}
+                    </p>
+                  </div>
+
                   <button style={S.btn()} onClick={createTournament}>Crear torneo →</button>
                 </div>
               </>
             )}
 
-            {/* SCHEDULE EDITOR */}
             {view === "schedule" && activeTournament && (
               <>
                 <p style={S.pageTitle}>Horario de jornadas</p>
-                <p style={S.pageSubtitle}>{activeTournament.name}</p>
-
-                {scheduleMatchdays.length === 0 ? (
-                  <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Inicia el torneo primero para ver las jornadas.</div>
-                ) : (
-                  <>
-                    <div style={{ ...S.card, background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", marginBottom: 16 }}>
-                      <p style={{ margin: "0 0 4px", fontSize: 13, color: C.blue, fontWeight: 700 }}>ℹ El horario aplica a todos los partidos de esa jornada</p>
-                      <p style={{ margin: 0, fontSize: 12, color: C.muted }}>Introduce la fecha y hora en que se juega cada jornada.</p>
+                <p style={S.pageSubtitle}>{activeTournament.name} {activeTournament.multiDate && "· Multi-fecha"}</p>
+                {scheduleMatchdays.length === 0
+                  ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>Inicia el torneo primero.</div>
+                  : <>
+                    <div style={{ ...S.card, background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", marginBottom: 14 }}>
+                      <p style={{ margin: "0 0 4px", fontSize: 13, color: C.blue, fontWeight: 700 }}>ℹ La fecha/hora aplica a todos los partidos de esa jornada</p>
+                      <p style={{ margin: 0, fontSize: 12, color: C.muted }}>{activeTournament.multiDate ? "Cada jornada puede tener su propia fecha." : "Al ser torneo de un día, todas las jornadas deberían tener la misma fecha."}</p>
                     </div>
-
                     {scheduleMatchdays.map(day => (
                       <div key={day.key} style={{ ...S.card, marginBottom: 8 }}>
                         <div style={{ display: "flex", alignItems: "start", gap: 12 }}>
                           <div style={{ flex: 1 }}>
-                            <p style={{ margin: "0 0 3px", fontWeight: 700, fontSize: 14 }}>
-                              {day.type === "group"
-                                ? `Jornada ${day.matchdayNum} · Grupo ${day.groupName}`
-                                : day.phase}
+                            <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14 }}>
+                              {day.type === "group" ? `Jornada ${day.matchdayNum} · Grupo ${day.groupName}` : day.phase}
                             </p>
                             <p style={{ margin: "0 0 10px", color: C.muted, fontSize: 12 }}>{day.matches.length} partido{day.matches.length !== 1 ? "s" : ""}</p>
-                            <input
-                              type="datetime-local"
-                              value={scheduleEdits[day.schedKey]
-                                ? scheduleEdits[day.schedKey].slice(0, 16)
-                                : ""}
+                            <input type="datetime-local" value={scheduleEdits[day.schedKey] ? scheduleEdits[day.schedKey].slice(0, 16) : ""}
                               onChange={e => setScheduleEdits(p => ({ ...p, [day.schedKey]: e.target.value ? new Date(e.target.value).toISOString() : null }))}
-                              style={{ ...S.input, fontSize: 15, padding: "11px 12px", colorScheme: "dark" }}
-                            />
-                            {scheduleEdits[day.schedKey] && (
-                              <p style={{ margin: "6px 0 0", fontSize: 12, color: C.gold }}>🕐 {formatDatetime(scheduleEdits[day.schedKey])}</p>
-                            )}
+                              style={{ ...S.input, fontSize: 15, padding: "11px 12px" }} />
+                            {scheduleEdits[day.schedKey] && <p style={{ margin: "6px 0 0", fontSize: 12, color: C.gold }}>🕐 {formatDatetime(scheduleEdits[day.schedKey])}</p>}
                           </div>
                           {scheduleEdits[day.schedKey] && (
-                            <button style={{ ...S.btnSm, marginTop: 2, color: C.red, borderColor: "rgba(247,111,111,0.3)" }} onClick={() => setScheduleEdits(p => { const n = { ...p }; delete n[day.schedKey]; return n; })}>✕</button>
+                            <button style={{ ...S.btnSm, color: C.red, borderColor: "rgba(247,111,111,0.3)", marginTop: 2 }} onClick={() => setScheduleEdits(p => { const n = { ...p }; delete n[day.schedKey]; return n; })}>✕</button>
                           )}
                         </div>
                       </div>
                     ))}
-
-                    <div style={{ marginTop: 8 }}>
-                      <button style={{ ...S.btn(), opacity: savingSchedule ? 0.6 : 1 }} onClick={saveSchedule} disabled={savingSchedule}>
-                        {savingSchedule ? "Guardando..." : "Guardar horarios →"}
-                      </button>
-                    </div>
+                    <button style={{ ...S.btn(), opacity: savingSchedule ? 0.6 : 1, marginTop: 8 }} onClick={saveSchedule} disabled={savingSchedule}>
+                      {savingSchedule ? "Guardando..." : "Guardar horarios →"}
+                    </button>
                   </>
-                )}
+                }
               </>
             )}
 
-            {/* DETAIL */}
             {view === "detail" && activeTournament && (() => {
               const t = activeTournament;
               const hasGroups = t.groups?.length > 0;
@@ -328,6 +335,7 @@ export default function AdminDashboard({ onLogout }) {
               const approvedInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "aprobada");
               const pendingInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "pendiente");
               const canStart = t.status === "Abierto" && approvedInsc.length >= 2 && !hasGroups && !hasElim;
+              const canReset = hasGroups || hasElim || t.status !== "Abierto";
 
               return (
                 <div>
@@ -335,42 +343,27 @@ export default function AdminDashboard({ onLogout }) {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                       <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>{t.name}</h1>
                       <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
+                      {t.multiDate && <span style={S.tag(C.purple)}>Multi-fecha</span>}
                     </div>
                     <p style={{ margin: "0 0 4px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {approvedInsc.length} equipos</p>
                     {t.winner && <p style={{ margin: "4px 0", color: C.gold }}>🏆 {t.winner}</p>}
-                    {t.description && <p style={{ margin: "4px 0 0", color: C.muted, fontSize: 13 }}>{t.description}</p>}
                   </div>
 
-                  {/* WhatsApp group link */}
-                  {(t.whatsappLink || true) && (
-                    <div style={{ ...S.card, marginBottom: 12 }}>
-                      <p style={{ ...S.label, marginBottom: 8 }}>Grupo de WhatsApp del torneo</p>
-                      {t.whatsappLink ? (
-                        <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer"
-                          style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, textDecoration: "none", color: C.text, marginBottom: 8 }}>
-                          <span style={{ fontSize: 22 }}>💬</span>
-                          <div>
-                            <p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600, color: "#25d366" }}>Unirse al grupo</p>
-                            <p style={{ margin: 0, fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{t.whatsappLink}</p>
-                          </div>
-                          <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
-                        </a>
-                      ) : (
-                        <p style={{ color: C.faint, fontSize: 13 }}>Sin enlace de grupo.</p>
-                      )}
-                      <input
-                        style={{ ...S.input, fontSize: 14 }}
-                        placeholder="https://chat.whatsapp.com/..."
-                        defaultValue={t.whatsappLink || ""}
-                        onBlur={async e => {
-                          if (e.target.value !== (t.whatsappLink || "")) {
-                            await updateDoc(doc(db, "tournaments", t.id), { whatsappLink: e.target.value.trim() });
-                            showNotif("Enlace actualizado ✓");
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
+                  {/* WhatsApp link */}
+                  <div style={{ ...S.card, marginBottom: 12 }}>
+                    <p style={{ ...S.label, marginBottom: 8 }}>Grupo de WhatsApp</p>
+                    {t.whatsappLink && (
+                      <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 8 }}>
+                        <span style={{ fontSize: 20 }}>💬</span>
+                        <span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Unirse al grupo</span>
+                        <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
+                      </a>
+                    )}
+                    <input style={{ ...S.input, fontSize: 14 }} placeholder="https://chat.whatsapp.com/..."
+                      defaultValue={t.whatsappLink || ""}
+                      onBlur={async e => { if (e.target.value !== (t.whatsappLink || "")) { await updateDoc(doc(db, "tournaments", t.id), { whatsappLink: e.target.value.trim() }); showNotif("Enlace actualizado ✓"); } }} />
+                  </div>
 
                   {/* Actions */}
                   <div style={{ overflowX: "auto", marginBottom: 14 }}>
@@ -380,23 +373,33 @@ export default function AdminDashboard({ onLogout }) {
                           onClick={() => updateDoc(doc(db, "tournaments", t.id), { status: s })}>{s}</button>
                       ))}
                       <button style={{ ...S.btnSm, borderColor: "rgba(79,142,247,0.4)", color: C.blue }} onClick={() => { setInscTarget(t); setShowInscModal(true); }}>+ Equipo</button>
-                      {(hasGroups || hasElim) && (
-                        <button style={{ ...S.btnSm, borderColor: "rgba(232,184,75,0.4)", color: C.gold }} onClick={() => setView("schedule")}>🕐 Horarios</button>
+                      {(hasGroups || hasElim) && <button style={{ ...S.btnSm, borderColor: "rgba(232,184,75,0.4)", color: C.gold }} onClick={() => setView("schedule")}>🕐 Horarios</button>}
+                      {canReset && (
+                        <button style={{ ...S.btnSm, borderColor: "rgba(167,139,250,0.4)", color: C.purple, opacity: resetting ? 0.6 : 1 }} onClick={() => resetTournament(t)} disabled={resetting}>
+                          🔄 Reiniciar
+                        </button>
                       )}
-                      <button style={S.btnDanger} onClick={async () => { if (!window.confirm("¿Eliminar?")) return; await deleteDoc(doc(db, "tournaments", t.id)); setView("list"); }}>Eliminar</button>
+                      <button style={S.btnDanger} onClick={async () => { if (!window.confirm("¿Eliminar torneo?")) return; await deleteDoc(doc(db, "tournaments", t.id)); setView("list"); }}>Eliminar</button>
                     </div>
                   </div>
 
+                  {/* Reset info box */}
+                  {canReset && (
+                    <div style={{ background: "rgba(167,139,250,0.06)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+                      <p style={{ margin: 0, fontSize: 12, color: C.purple }}>🔄 <strong>Reiniciar torneo</strong> borra grupos y resultados pero conserva las inscripciones. Útil para corregir la estructura de jornadas.</p>
+                    </div>
+                  )}
+
                   {canStart && (
                     <div style={{ background: "rgba(82,214,138,0.08)", border: "1px solid rgba(82,214,138,0.25)", borderRadius: 10, padding: 16, marginBottom: 14 }}>
-                      <p style={{ margin: "0 0 10px", color: C.green, fontSize: 13 }}>✓ {approvedInsc.length} equipos listos</p>
+                      <p style={{ margin: "0 0 10px", color: C.green, fontSize: 13 }}>✓ {approvedInsc.length} equipos listos para iniciar</p>
                       <button style={{ ...S.btn(C.green), color: "#07090f" }} onClick={() => startTournament(t)}>▶ Iniciar torneo</button>
                     </div>
                   )}
 
                   {pendingInsc.length > 0 && (
                     <div style={{ ...S.card, marginBottom: 14 }}>
-                      <p style={{ ...S.label, marginBottom: 12 }}>Pendientes ({pendingInsc.length})</p>
+                      <p style={{ ...S.label, marginBottom: 12 }}>Solicitudes pendientes ({pendingInsc.length})</p>
                       {pendingInsc.map(i => (
                         <div key={i.id} style={{ paddingBottom: 12, marginBottom: 12, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
@@ -422,19 +425,15 @@ export default function AdminDashboard({ onLogout }) {
                       {approvedInsc.map(i => (
                         <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                           <TeamLogo name={i.teamName} logoUrl={i.logoUrl} size={32} />
-                          <div>
-                            <p style={{ margin: "0 0 1px", fontWeight: 600, fontSize: 13 }}>{i.teamName}</p>
-                            <p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{i.userName}</p>
-                          </div>
+                          <div><p style={{ margin: "0 0 1px", fontWeight: 600, fontSize: 13 }}>{i.teamName}</p><p style={{ margin: 0, color: C.faint, fontSize: 11 }}>{i.userName}</p></div>
                         </div>
                       ))}
                     </div>
                   )}
 
-                  {/* Group standings */}
                   {hasGroups && (
                     <div style={{ marginBottom: 16 }}>
-                      <p style={S.sectionTitle}>Clasificación de grupos</p>
+                      <p style={S.sectionTitle}>Clasificación</p>
                       {t.groups.map((g, gi) => (
                         <div key={gi} style={{ ...S.card, marginBottom: 10 }}>
                           <p style={{ ...S.label, color: C.gold, marginBottom: 10 }}>Grupo {g.name}</p>
@@ -458,20 +457,17 @@ export default function AdminDashboard({ onLogout }) {
                           </div>
                         </div>
                       ))}
-                      {t.format === "Grupos + Eliminatoria" &&
-                        t.groups.every(g => g.matches.every(m => m.matchStatus === "validado")) &&
-                        !hasElim && (
-                          <button style={S.btn(C.gold)} onClick={async () => {
-                            const matches = buildSeededElimination(t.groups, t.qualify || 2);
-                            if (!matches.length) return showNotif("No hay suficientes clasificados");
-                            await updateDoc(doc(db, "tournaments", t.id), { eliminationRounds: [{ round: 1, matches }] });
-                            showNotif("Fase eliminatoria generada ✓");
-                          }}>Generar fase eliminatoria →</button>
-                        )}
+                      {t.format === "Grupos + Eliminatoria" && t.groups.every(g => g.matches.every(m => m.matchStatus === "validado")) && !hasElim && (
+                        <button style={S.btn(C.gold)} onClick={async () => {
+                          const matches = buildSeededElimination(t.groups, t.qualify || 2);
+                          if (!matches.length) return showNotif("No hay suficientes clasificados");
+                          await updateDoc(doc(db, "tournaments", t.id), { eliminationRounds: [{ round: 1, matches }] });
+                          showNotif("Fase eliminatoria generada ✓");
+                        }}>Generar fase eliminatoria →</button>
+                      )}
                     </div>
                   )}
 
-                  {/* Elim overview */}
                   {hasElim && (
                     <div style={{ marginBottom: 16 }}>
                       <p style={S.sectionTitle}>Cuadro eliminatorio</p>
@@ -510,7 +506,6 @@ export default function AdminDashboard({ onLogout }) {
           </>
         )}
 
-        {/* ══ PARTIDOS ══ */}
         {tab === "partidos" && (
           <>
             <p style={S.pageTitle}>Partidos</p>
@@ -519,7 +514,14 @@ export default function AdminDashboard({ onLogout }) {
           </>
         )}
 
-        {/* ══ INSCRIPCIONES ══ */}
+        {tab === "ranking" && (
+          <>
+            <p style={S.pageTitle}>Ranking ELO</p>
+            <p style={S.pageSubtitle}>Clasificación histórica de equipos</p>
+            <RankingPanel logoMap={logoMap} inscriptions={inscriptions} />
+          </>
+        )}
+
         {tab === "inscripciones" && (
           <>
             <p style={S.pageTitle}>Inscripciones</p>
@@ -553,12 +555,11 @@ export default function AdminDashboard({ onLogout }) {
           </>
         )}
 
-        {/* ══ NOTICIAS ══ */}
         {tab === "noticias" && (
           <>
             <p style={S.pageTitle}>Noticias</p>
             <div style={S.card}>
-              <p style={{ ...S.label, color: C.gold, marginBottom: 14 }}>{editingNewsId ? "✏ Editando" : "+ Nueva noticia"}</p>
+              <p style={{ ...S.label, color: C.gold, marginBottom: 14 }}>{editingNewsId ? "✏ Editando" : "+ Nueva"}</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div><label style={S.label}>Título</label><input style={S.input} value={newsForm.title} onChange={e => setNewsForm(p => ({ ...p, title: e.target.value }))} /></div>
                 <div><label style={S.label}>Categoría</label>
