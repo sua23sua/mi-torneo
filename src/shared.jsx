@@ -1,11 +1,19 @@
 export const C = {
   blue: "#4f8ef7", gold: "#e8b84b", green: "#52d68a", red: "#f76f6f",
+  orange: "#f7934f",
   bg: "#07090f", card: "#0d1117", border: "rgba(255,255,255,0.06)",
   text: "#edf0f7", muted: "#5a6880", faint: "#2e3a4a",
 };
 
 export const statusColor = {
   Abierto: "#52d68a", "En curso": "#4f8ef7", Finalizado: "#e8b84b", Cerrado: "#6b7a90",
+};
+
+export const matchStatusColor = {
+  pendiente: "#5a6880",
+  parcial: "#f7934f",
+  conflicto: "#f76f6f",
+  validado: "#52d68a",
 };
 
 export function getRoundName(totalRounds, roundIdx) {
@@ -27,14 +35,38 @@ export function buildGroups(teams, groupCount, legs = 1) {
     const matches = [];
     for (let a = 0; a < g.teams.length; a++) {
       for (let b = a + 1; b < g.teams.length; b++) {
-        matches.push({ teamA: g.teams[a], teamB: g.teams[b], scoreA: null, scoreB: null, played: false, leg: 1 });
-        if (legs === 2)
-          matches.push({ teamA: g.teams[b], teamB: g.teams[a], scoreA: null, scoreB: null, played: false, leg: 2 });
+        matches.push(makeMatch(g.teams[a], g.teams[b], 1));
+        if (legs === 2) matches.push(makeMatch(g.teams[b], g.teams[a], 2));
       }
     }
     g.matches = matches;
   });
   return groups;
+}
+
+// A match object — all report fields included from creation
+export function makeMatch(teamA, teamB, leg = 1) {
+  return {
+    teamA, teamB, leg,
+    scoreA: null, scoreB: null,
+    played: false,
+    // report fields
+    reportByA: null,   // { scoreA, scoreB, userId, userName, at }
+    reportByB: null,   // { scoreA, scoreB, userId, userName, at }
+    matchStatus: "pendiente", // pendiente | parcial | conflicto | validado
+    winner: null,
+  };
+}
+
+export function makeElimMatch(teamA, teamB) {
+  return {
+    teamA, teamB,
+    scoreA: null, scoreB: null,
+    winner: null,
+    reportByA: null,
+    reportByB: null,
+    matchStatus: "pendiente",
+  };
 }
 
 export function applyGroupResult(standings, teamA, teamB, scoreA, scoreB) {
@@ -58,20 +90,20 @@ export function buildSeededElimination(groups, qualify) {
     for (let i = 0; i < firstPlace.length; i++) {
       const oppIdx = (i + Math.floor(numGroups / 2)) % numGroups;
       const opp = secondPlace[oppIdx] || secondPlace[i];
-      if (opp) matches.push({ teamA: firstPlace[i], teamB: opp, scoreA: null, scoreB: null, winner: null });
+      if (opp) matches.push(makeElimMatch(firstPlace[i], opp));
     }
     const paired = new Set(matches.flatMap(m => [m.teamA, m.teamB]));
     const remaining = [...firstPlace, ...secondPlace].filter(t => !paired.has(t));
     for (let i = 0; i < remaining.length - 1; i += 2)
-      matches.push({ teamA: remaining[i], teamB: remaining[i + 1], scoreA: null, scoreB: null, winner: null });
+      matches.push(makeElimMatch(remaining[i], remaining[i + 1]));
   } else {
     for (let i = 0; i < firstPlace.length - 1; i += 2)
-      matches.push({ teamA: firstPlace[i], teamB: firstPlace[i + 1], scoreA: null, scoreB: null, winner: null });
+      matches.push(makeElimMatch(firstPlace[i], firstPlace[i + 1]));
   }
   for (let pos = 2; pos < qualify; pos++) {
     const extras = byPosition[pos] || [];
     for (let i = 0; i < extras.length - 1; i += 2)
-      matches.push({ teamA: extras[i], teamB: extras[i + 1], scoreA: null, scoreB: null, winner: null });
+      matches.push(makeElimMatch(extras[i], extras[i + 1]));
   }
   return matches;
 }
@@ -80,8 +112,16 @@ export function buildEliminationRound(teams) {
   const shuffled = shuffle(teams);
   const matches = [];
   for (let i = 0; i < shuffled.length; i += 2)
-    matches.push({ teamA: shuffled[i], teamB: shuffled[i + 1] || "BYE", scoreA: null, scoreB: null, winner: null });
+    matches.push(makeElimMatch(shuffled[i], shuffled[i + 1] || "BYE"));
   return matches;
+}
+
+// Given a match and a report from one side, compute the new matchStatus
+export function computeMatchStatus(match, side, scoreA, scoreB) {
+  const other = side === "A" ? match.reportByB : match.reportByA;
+  if (!other) return "parcial";
+  if (other.scoreA === scoreA && other.scoreB === scoreB) return "validado";
+  return "conflicto";
 }
 
 export function TeamLogo({ name, logoUrl, size = 28 }) {
@@ -107,7 +147,6 @@ export function TeamLogo({ name, logoUrl, size = 28 }) {
   );
 }
 
-// ── Bottom nav tab bar (mobile-first) ──────────────────────
 export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   return (
     <nav style={{
@@ -120,16 +159,16 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
       {tabs.map(t => (
         <button key={t.id} onClick={() => onChange(t.id)} style={{
           flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-          justifyContent: "center", gap: 3, padding: "10px 4px 8px",
+          justifyContent: "center", gap: 3, padding: "10px 2px 8px",
           background: "none", border: "none", cursor: "pointer",
           color: active === t.id ? color : C.muted,
           fontFamily: "'Georgia',serif", transition: "color .15s",
-          minWidth: 0,
+          minWidth: 0, position: "relative",
         }}>
-          <span style={{ fontSize: 20, lineHeight: 1 }}>{t.icon}</span>
-          <span style={{ fontSize: 9, letterSpacing: 1, textTransform: "uppercase", lineHeight: 1 }}>{t.label}</span>
+          <span style={{ fontSize: 19, lineHeight: 1 }}>{t.icon}</span>
+          <span style={{ fontSize: 9, letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1, whiteSpace: "nowrap" }}>{t.label}</span>
           {t.badge > 0 && (
-            <span style={{ position: "absolute", top: 6, fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif" }}>{t.badge}</span>
+            <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>
           )}
         </button>
       ))}
@@ -146,18 +185,13 @@ export const S = {
     borderBottom: "1px solid rgba(255,255,255,0.05)",
     position: "sticky", top: 0, zIndex: 100,
   },
-  // main with bottom padding for nav bar
   main: { maxWidth: 680, margin: "0 auto", padding: "20px 16px 90px" },
-  card: {
-    border: "1px solid rgba(255,255,255,0.06)", background: C.card,
-    borderRadius: 12, padding: 16, marginBottom: 10,
-  },
+  card: { border: "1px solid rgba(255,255,255,0.06)", background: C.card, borderRadius: 12, padding: 16, marginBottom: 10 },
   label: { fontSize: 10, letterSpacing: 2.5, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
   input: {
     width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10,
     background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
-    color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif",
-    WebkitAppearance: "none", // prevent iOS zoom
+    color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif", WebkitAppearance: "none",
   },
   textarea: {
     width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10,
@@ -170,31 +204,27 @@ export const S = {
     background: "#0d1117", border: "1px solid rgba(255,255,255,0.09)",
     color: C.text, fontFamily: "'Georgia',serif", WebkitAppearance: "none",
     backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a6880' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")",
-    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center",
-    paddingRight: 36,
+    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center", paddingRight: 36,
   },
   btn: (color = "#4f8ef7") => ({
     padding: "14px 20px", background: color, border: "none", borderRadius: 10,
     color: color === "#e8b84b" ? "#07090f" : "#fff",
     cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
     fontSize: 13, fontWeight: 700, fontFamily: "'Georgia',serif",
-    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
-    width: "100%",
+    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", width: "100%",
   }),
   btnInline: (color = "#4f8ef7") => ({
     padding: "10px 18px", background: color, border: "none", borderRadius: 8,
     color: color === "#e8b84b" ? "#07090f" : "#fff",
     cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
     fontSize: 11, fontWeight: 700, fontFamily: "'Georgia',serif",
-    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
-    flexShrink: 0,
+    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", flexShrink: 0,
   }),
   btnSm: {
     padding: "8px 14px", background: "transparent", borderRadius: 8,
     border: "1px solid rgba(255,255,255,0.13)", color: C.muted,
     cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
-    fontFamily: "'Georgia',serif", whiteSpace: "nowrap",
-    WebkitTapHighlightColor: "transparent", flexShrink: 0,
+    fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", flexShrink: 0,
   },
   btnDanger: {
     padding: "8px 14px", background: "transparent", borderRadius: 8,
@@ -207,21 +237,14 @@ export const S = {
     background: `${color}1a`, color, border: `1px solid ${color}40`,
     textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap",
   }),
-  th: {
-    fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted,
-    padding: "9px 10px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)",
-  },
+  th: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted, padding: "9px 10px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)" },
   td: { padding: "10px 10px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
   numInput: {
-    width: 44, padding: "8px 4px", textAlign: "center", borderRadius: 8,
+    width: 52, padding: "10px 4px", textAlign: "center", borderRadius: 8,
     background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-    color: C.text, fontFamily: "'Georgia',serif", fontSize: 15,
-    WebkitAppearance: "none",
+    color: C.text, fontFamily: "'Georgia',serif", fontSize: 18, WebkitAppearance: "none",
   },
-  sectionTitle: {
-    fontSize: 10, letterSpacing: 3, textTransform: "uppercase",
-    color: C.blue, margin: "0 0 14px",
-  },
+  sectionTitle: { fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.blue, margin: "0 0 14px" },
   pageTitle: { fontSize: 22, fontWeight: 700, margin: "0 0 4px" },
   pageSubtitle: { fontSize: 13, color: C.muted, margin: "0 0 20px" },
 };
