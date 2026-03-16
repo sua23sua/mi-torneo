@@ -1,25 +1,15 @@
 import { useState, useEffect } from "react";
 import { db, storage } from "../firebase";
-import { collection, addDoc, query, where, onSnapshot, orderBy, getDoc, doc } from "firebase/firestore";
+import { collection, addDoc, query, where, onSnapshot, orderBy, doc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "../AuthContext";
 import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, isTournamentActive } from "../shared.jsx";
 import MatchesPanel from "./MatchesPanel.jsx";
 import RankingPanel from "./RankingPanel.jsx";
 import TeamManager from "./TeamManager.jsx";
+import { NormativaView } from "./NormativaPanel.jsx";
 
 const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
-
-const NORMATIVA = [
-  { titulo: "1. Participación", texto: "Todos los equipos deben estar registrados y confirmados antes del inicio." },
-  { titulo: "2. Formato", texto: "Los partidos se juegan en FIFA Clubes Pro con la configuración oficial." },
-  { titulo: "3. Puntualidad", texto: "10 minutos de margen. Incomparecencia = derrota (0-3)." },
-  { titulo: "4. Conducta", texto: "Comportamiento deportivo y respetuoso. Las infracciones pueden suponer expulsión." },
-  { titulo: "5. Resultados", texto: "Reportados por ambos equipos. En caso de discrepancia, decide la organización." },
-  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), DG y GF." },
-  { titulo: "7. Eliminatoria", texto: "No se permiten empates. En caso de igualdad se juegan penaltis." },
-  { titulo: "8. Modificaciones", texto: "La organización puede modificar el formato en casos excepcionales." },
-];
 
 const TABS = [
   { id: "torneos", icon: "🎮", label: "Torneos" },
@@ -78,10 +68,10 @@ export default function UserDashboard({ onLogout }) {
   }
 
   async function inscribirse() {
-    if (!myTeam) return showNotif("Primero debes crear tu equipo en la pestaña 'Mi equipo'");
+    if (!myTeam) return showNotif("Primero debes crear tu equipo en 'Mi equipo'");
     if (!inscForm.managerId.trim()) return showNotif("Introduce el ID Manager");
     if (!inscForm.phone.trim()) return showNotif("Introduce un teléfono de contacto");
-    if (myInscriptions.find(i => i.tournamentId === selectedTournament.id)) return showNotif("Ya estás inscrito en este torneo");
+    if (myInscriptions.find(i => i.tournamentId === selectedTournament.id)) return showNotif("Ya estás inscrito");
     setUploading(true);
     try {
       await addDoc(collection(db, "inscriptions"), {
@@ -117,7 +107,6 @@ export default function UserDashboard({ onLogout }) {
     <div style={S.wrap}>
       {notif && <div style={{ position: "fixed", top: 16, left: 16, right: 16, background: C.gold, color: "#07090f", padding: "13px 16px", zIndex: 1000, fontSize: 13, fontFamily: "'Georgia',serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", borderRadius: 10, textAlign: "center", fontWeight: 600 }}>{notif}</div>}
 
-      {/* Inscription Modal */}
       {showModal && selectedTournament && (
         <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 300, overflowY: "auto", display: "flex", flexDirection: "column" }}>
           <div style={{ ...S.topBar, position: "relative", flexShrink: 0 }}>
@@ -127,7 +116,6 @@ export default function UserDashboard({ onLogout }) {
           </div>
           <div style={{ padding: "24px 16px 40px", flex: 1 }}>
             <p style={{ margin: "0 0 16px", fontWeight: 700, fontSize: 15 }}>{selectedTournament.name}</p>
-
             {!myTeam ? (
               <div style={{ ...S.card, background: "rgba(247,111,111,0.08)", border: "1px solid rgba(247,111,111,0.2)", textAlign: "center", padding: 24 }}>
                 <p style={{ margin: "0 0 12px", color: C.red, fontSize: 14 }}>Necesitas crear tu equipo primero</p>
@@ -136,20 +124,13 @@ export default function UserDashboard({ onLogout }) {
             ) : (
               <>
                 {selectedTournament.whatsappLink && (
-                  <a href={selectedTournament.whatsappLink} target="_blank" rel="noopener noreferrer"
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 20 }}>
-                    <span style={{ fontSize: 18 }}>💬</span>
-                    <span style={{ fontSize: 13, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp del torneo</span>
-                    <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
+                  <a href={selectedTournament.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 20 }}>
+                    <span style={{ fontSize: 18 }}>💬</span><span style={{ fontSize: 13, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp</span><span style={{ marginLeft: "auto", color: C.faint }}>→</span>
                   </a>
                 )}
-                {/* Team preview */}
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: 10, marginBottom: 20 }}>
                   <TeamLogo name={myTeam.name} logoUrl={myTeam.logoUrl} size={44} />
-                  <div>
-                    <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 15 }}>{myTeam.name}</p>
-                    <p style={{ margin: 0, fontSize: 12, color: C.muted }}>Tu equipo</p>
-                  </div>
+                  <div><p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 15 }}>{myTeam.name}</p><p style={{ margin: 0, fontSize: 12, color: C.muted }}>Tu equipo</p></div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <div><label style={S.label}>ID Manager *</label><input style={S.input} placeholder="Tu ID de FIFA" value={inscForm.managerId} onChange={e => setInscForm(p => ({ ...p, managerId: e.target.value }))} /></div>
@@ -313,15 +294,11 @@ export default function UserDashboard({ onLogout }) {
         {tab === "normativa" && (
           <>
             <p style={S.pageTitle}>Normativa</p>
-            <p style={S.pageSubtitle}>Reglamento oficial</p>
-            {NORMATIVA.map((n, i) => (
-              <div key={i} style={S.card}>
-                <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14, color: C.gold }}>{n.titulo}</p>
-                <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.65 }}>{n.texto}</p>
-              </div>
-            ))}
+            <p style={S.pageSubtitle}>Reglamento oficial del torneo</p>
+            <NormativaView />
           </>
         )}
+
       </main>
 
       <BottomNav tabs={navTabs} active={tab} onChange={setTab} color={C.gold} />

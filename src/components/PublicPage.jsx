@@ -4,19 +4,9 @@ import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, isTournamentActive } from "../shared.jsx";
 import MatchesPanel from "./MatchesPanel.jsx";
 import RankingPanel from "./RankingPanel.jsx";
+import { NormativaView } from "./NormativaPanel.jsx";
 
 const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
-
-const NORMATIVA = [
-  { titulo: "1. Participación", texto: "Todos los equipos deben estar registrados y confirmados antes del inicio." },
-  { titulo: "2. Formato", texto: "Los partidos se juegan en FIFA Clubes Pro con la configuración oficial." },
-  { titulo: "3. Puntualidad", texto: "10 minutos de margen. El incumplimiento puede suponer derrota por incomparecencia (0-3)." },
-  { titulo: "4. Conducta", texto: "Comportamiento deportivo y respetuoso. Las infracciones pueden suponer expulsión." },
-  { titulo: "5. Resultados", texto: "Reportados por ambos equipos. En caso de discrepancia, decide la organización." },
-  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), DG y GF." },
-  { titulo: "7. Eliminatoria", texto: "No se permiten empates. En caso de igualdad se juegan penaltis." },
-  { titulo: "8. Modificaciones", texto: "La organización puede modificar el formato en casos excepcionales." },
-];
 
 const TABS = [
   { id: "torneos", icon: "🎮", label: "Torneos" },
@@ -33,10 +23,9 @@ export default function PublicPage({ onLogin }) {
   const [news, setNews] = useState([]);
   const [inscriptions, setInscriptions] = useState([]);
   const [tab, setTab] = useState("torneos");
-  const [tourneySubTab, setTourneySubTab] = useState("activos"); // activos | historial
+  const [tourneySubTab, setTourneySubTab] = useState("activos");
   const [expandedTId, setExpandedTId] = useState(null);
   const [expandedNews, setExpandedNews] = useState(null);
-  // History filters
   const now = new Date();
   const [histMonth, setHistMonth] = useState(now.getMonth());
   const [histYear, setHistYear] = useState(now.getFullYear());
@@ -54,16 +43,10 @@ export default function PublicPage({ onLogin }) {
 
   const activeTournaments = tournaments.filter(isTournamentActive);
   const historyTournaments = tournaments.filter(t => !isTournamentActive(t));
-
-  // Filter history by month/year and search
   const filteredHistory = historyTournaments.filter(t => {
     const d = new Date(t.finishedAt || t.createdAt);
-    const monthMatch = d.getMonth() === histMonth && d.getFullYear() === histYear;
-    const searchMatch = !histSearch || t.name.toLowerCase().includes(histSearch.toLowerCase());
-    return monthMatch && searchMatch;
+    return d.getMonth() === histMonth && d.getFullYear() === histYear && (!histSearch || t.name.toLowerCase().includes(histSearch.toLowerCase()));
   });
-
-  // Years that have tournaments in history
   const availableYears = [...new Set(historyTournaments.map(t => new Date(t.finishedAt || t.createdAt).getFullYear()))].sort((a, b) => b - a);
 
   function TRow({ name, size = 22 }) {
@@ -93,7 +76,7 @@ export default function PublicPage({ onLogin }) {
         <div style={{ display: "flex", gap: 8 }}>
           {t.status === "Abierto" && <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={onLogin}>Inscribirse</button>}
           {(hasGroups || hasElim) && <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Ver clasificación ▼"}</button>}
-          {t.whatsappLink && <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ ...S.btnInline("#25d366"), textDecoration: "none" }}>💬</a>}
+          {t.whatsappLink && <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ ...S.btnInline("#25d366"), textDecoration: "none", display: "flex", alignItems: "center" }}>💬</a>}
         </div>
         {isExpanded && (
           <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
@@ -150,41 +133,30 @@ export default function PublicPage({ onLogin }) {
 
         {tab === "torneos" && (
           <>
-            {/* Sub tabs: activos / historial */}
             <div style={{ display: "flex", gap: 0, marginBottom: 20, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, overflow: "hidden" }}>
               {[["activos", `Torneos activos (${activeTournaments.length})`], ["historial", "Historial"]].map(([id, label]) => (
                 <button key={id} onClick={() => setTourneySubTab(id)} style={{ flex: 1, padding: "12px 8px", background: tourneySubTab === id ? "rgba(232,184,75,0.1)" : "transparent", border: "none", borderRight: id === "activos" ? "1px solid rgba(255,255,255,0.08)" : "none", color: tourneySubTab === id ? C.gold : C.muted, cursor: "pointer", fontSize: 12, fontWeight: tourneySubTab === id ? 700 : 400, fontFamily: "'Georgia',serif", letterSpacing: 1 }}>{label}</button>
               ))}
             </div>
-
             {tourneySubTab === "activos" && (
               activeTournaments.length === 0
-                ? <div style={{ ...S.card, textAlign: "center", padding: 48 }}><div style={{ fontSize: 40, marginBottom: 12 }}>🎮</div><p style={{ color: C.muted, marginBottom: 16 }}>No hay torneos activos ahora mismo</p><button style={S.btn(C.gold)} onClick={onLogin}>Regístrate para competir →</button></div>
+                ? <div style={{ ...S.card, textAlign: "center", padding: 48 }}><div style={{ fontSize: 40, marginBottom: 12 }}>🎮</div><p style={{ color: C.muted, marginBottom: 16 }}>No hay torneos activos</p><button style={S.btn(C.gold)} onClick={onLogin}>Regístrate para competir →</button></div>
                 : activeTournaments.map(t => <TournamentCard key={t.id} t={t} />)
             )}
-
             {tourneySubTab === "historial" && (
               <div>
-                {/* Filters */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 120 }}>
-                    <select style={{ ...S.select, padding: "10px 12px", fontSize: 14 }} value={histMonth} onChange={e => setHistMonth(+e.target.value)}>
-                      {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ width: 90 }}>
-                    <select style={{ ...S.select, padding: "10px 12px", fontSize: 14 }} value={histYear} onChange={e => setHistYear(+e.target.value)}>
-                      {(availableYears.length ? availableYears : [now.getFullYear()]).map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                  </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <select style={{ ...S.select, flex: 1, padding: "10px 12px", fontSize: 14 }} value={histMonth} onChange={e => setHistMonth(+e.target.value)}>
+                    {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                  </select>
+                  <select style={{ ...S.select, width: 90, padding: "10px 12px", fontSize: 14 }} value={histYear} onChange={e => setHistYear(+e.target.value)}>
+                    {(availableYears.length ? availableYears : [now.getFullYear()]).map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
                 </div>
-                <div style={{ marginBottom: 14 }}>
-                  <input style={{ ...S.input, fontSize: 14 }} placeholder="Buscar por nombre..." value={histSearch} onChange={e => setHistSearch(e.target.value)} />
-                </div>
+                <input style={{ ...S.input, marginBottom: 12, fontSize: 14 }} placeholder="Buscar por nombre..." value={histSearch} onChange={e => setHistSearch(e.target.value)} />
                 {filteredHistory.length === 0
                   ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay torneos en {MONTHS[histMonth]} {histYear}.</div>
-                  : filteredHistory.map(t => <TournamentCard key={t.id} t={t} />)
-                }
+                  : filteredHistory.map(t => <TournamentCard key={t.id} t={t} />)}
               </div>
             )}
           </>
@@ -210,7 +182,8 @@ export default function PublicPage({ onLogin }) {
           <>
             <p style={S.pageTitle}>Noticias</p>
             <p style={S.pageSubtitle}>{news.length} publicaciones</p>
-            {news.length === 0 ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay noticias.</div>
+            {news.length === 0
+              ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay noticias.</div>
               : news.map(n => (
                 <div key={n.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => setExpandedNews(expandedNews === n.id ? null : n.id)}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8, marginBottom: 5 }}>
@@ -225,7 +198,8 @@ export default function PublicPage({ onLogin }) {
                   </div>
                   {expandedNews === n.id && <p style={{ margin: "10px 0 0", fontSize: 14, color: "#8a9ab4", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.body}</p>}
                 </div>
-              ))}
+              ))
+            }
           </>
         )}
 
@@ -233,18 +207,14 @@ export default function PublicPage({ onLogin }) {
           <>
             <p style={S.pageTitle}>Normativa</p>
             <p style={S.pageSubtitle}>Reglamento oficial del torneo</p>
-            {NORMATIVA.map((n, i) => (
-              <div key={i} style={S.card}>
-                <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14, color: C.gold }}>{n.titulo}</p>
-                <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.65 }}>{n.texto}</p>
-              </div>
-            ))}
+            <NormativaView />
             <div style={{ ...S.card, background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", marginTop: 8, textAlign: "center", padding: 24 }}>
               <p style={{ margin: "0 0 14px", fontSize: 14 }}>¿Listo para competir?</p>
               <button style={S.btn(C.gold)} onClick={onLogin}>Registrarse ahora →</button>
             </div>
           </>
         )}
+
       </main>
 
       <BottomNav tabs={TABS} active={tab} onChange={setTab} color={C.gold} />
