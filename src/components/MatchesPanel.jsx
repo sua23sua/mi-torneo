@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { db } from "../firebase";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
-import { C, S, TeamLogo, matchStatusColor, getRoundName, applyGroupResult, computeMatchStatus, formatDatetime, calcEloChange, ELO_DEFAULT } from "../shared.jsx";
+import { C, S, TeamLogo, matchStatusColor, getRoundName, applyGroupResult, computeMatchStatus, formatDatetime, calcEloChange, ELO_DEFAULT, TOURNAMENT_TYPES } from "../shared.jsx";
 
 export function collectMatchdays(tournaments) {
   const result = [];
@@ -13,40 +13,53 @@ export function collectMatchdays(tournaments) {
       (g.matches || []).forEach((m, mi) => { const day = m.matchday || 1; if (!byDay[day]) byDay[day] = []; byDay[day].push({ ...m, _mi: mi }); });
       Object.entries(byDay).sort((a, b) => +a[0] - +b[0]).forEach(([day, matches]) => {
         const schedKey = `g_${gi}_d_${day}`;
-        result.push({ key: `t_${t.id}_${schedKey}`, tournamentId: t.id, tournamentName: t.name, groupName: g.name, matchdayNum: +day, datetime: schedule[schedKey] || null, phase: `Grupo ${g.name}`, type: "group", gi, schedKey, matches });
+        result.push({ key: `t_${t.id}_${schedKey}`, tournamentId: t.id, tournamentName: t.name, tournamentType: t.tournamentType || "rapido", numTeams: t.teams?.length || 8, groupName: g.name, matchdayNum: +day, datetime: schedule[schedKey] || null, phase: `Grupo ${g.name}`, type: "group", gi, schedKey, matches });
       });
     });
     t.eliminationRounds?.forEach((round, ri) => {
       const schedKey = `elim_${ri}`;
-      result.push({ key: `t_${t.id}_${schedKey}`, tournamentId: t.id, tournamentName: t.name, groupName: null, matchdayNum: null, datetime: schedule[schedKey] || null, phase: getRoundName(t.eliminationRounds.length, ri), type: "elim", ri, schedKey, matches: (round.matches || []).map((m, mi) => ({ ...m, _mi: mi })) });
+      result.push({ key: `t_${t.id}_${schedKey}`, tournamentId: t.id, tournamentName: t.name, tournamentType: t.tournamentType || "rapido", numTeams: t.teams?.length || 8, groupName: null, matchdayNum: null, datetime: schedule[schedKey] || null, phase: getRoundName(t.eliminationRounds.length, ri), type: "elim", ri, schedKey, matches: (round.matches || []).map((m, mi) => ({ ...m, _mi: mi })) });
     });
   });
   return result;
 }
 
-// Update team ELO in 'teams' collection by team name via inscriptions
-async function updateTeamElo(inscriptions, teamNameA, teamNameB, scoreA, scoreB) {
+// ── Advanced ELO update ───────────────────────────────────────────
+async function updateTeamElo(inscriptions, teamNameA, teamNameB, scoreA, scoreB, tournamentType, numTeams, isElim) {
   const inscA = inscriptions.find(i => i.teamName === teamNameA && i.teamId);
   const inscB = inscriptions.find(i => i.teamName === teamNameB && i.teamId);
   if (!inscA?.teamId || !inscB?.teamId) return;
+
   try {
-    const [snapA, snapB] = await Promise.all([getDoc(doc(db, "teams", inscA.teamId)), getDoc(doc(db, "teams", inscB.teamId))]);
+    const [snapA, snapB] = await Promise.all([
+      getDoc(doc(db, "teams", inscA.teamId)),
+      getDoc(doc(db, "teams", inscB.teamId)),
+    ]);
     const teamA = snapA.exists() ? snapA.data() : {};
     const teamB = snapB.exists() ? snapB.data() : {};
-    const eloA = teamA.elo ?? ELO_DEFAULT, eloB = teamB.elo ?? ELO_DEFAULT;
-    const resultA = scoreA > scoreB ? 1 : scoreA === scoreB ? 0.5 : 0;
-    const changeA = calcEloChange(eloA, eloB, resultA);
-    const changeB = calcEloChange(eloB, eloA, 1 - resultA);
+
+    const eloA = teamA.elo ?? ELO_DEFAULT;
+    const eloB = teamB.elo ?? ELO_DEFAULT;
     const statsA = teamA.stats || { pj: 0, pg: 0, pe: 0, pp: 0, gf: 0, gc: 0, gd: 0, titulos: 0 };
     const statsB = teamB.stats || { pj: 0, pg: 0, pe: 0, pp: 0, gf: 0, gc: 0, gd: 0, titulos: 0 };
+
+    const kBase = TOURNAMENT_TYPES[tournamentType]?.kBase ?? 16;
+    const resultA = scoreA > scoreB ? 1 : scoreA === scoreB ? 0.5 : 0;
+    const resultB = 1 - resultA;
+
+    const changeA = calcEloChange(eloA, eloB, resultA, kBase, numTeams, isElim, statsA.pj);
+    const changeB = calcEloChange(eloB, eloA, resultB, kBase, numTeams, isElim, statsB.pj);
+
     await Promise.all([
       snapA.exists() && updateDoc(doc(db, "teams", inscA.teamId), {
-        elo: Math.max(100, eloA + changeA), lastEloChange: changeA,
+        elo: Math.max(100, eloA + changeA),
+        lastEloChange: changeA,
         stats: { ...statsA, pj: statsA.pj + 1, pg: statsA.pg + (resultA === 1 ? 1 : 0), pe: statsA.pe + (resultA === 0.5 ? 1 : 0), pp: statsA.pp + (resultA === 0 ? 1 : 0), gf: statsA.gf + scoreA, gc: statsA.gc + scoreB, gd: statsA.gd + scoreA - scoreB },
       }),
       snapB.exists() && updateDoc(doc(db, "teams", inscB.teamId), {
-        elo: Math.max(100, eloB + changeB), lastEloChange: changeB,
-        stats: { ...statsB, pj: statsB.pj + 1, pg: statsB.pg + (resultA === 0 ? 1 : 0), pe: statsB.pe + (resultA === 0.5 ? 1 : 0), pp: statsB.pp + (resultA === 1 ? 1 : 0), gf: statsB.gf + scoreB, gc: statsB.gc + scoreA, gd: statsB.gd + scoreB - scoreA },
+        elo: Math.max(100, eloB + changeB),
+        lastEloChange: changeB,
+        stats: { ...statsB, pj: statsB.pj + 1, pg: statsB.pg + (resultB === 1 ? 1 : 0), pe: statsB.pe + (resultB === 0.5 ? 1 : 0), pp: statsB.pp + (resultB === 0 ? 1 : 0), gf: statsB.gf + scoreB, gc: statsB.gc + scoreA, gd: statsB.gd + scoreB - scoreA },
       }),
     ]);
   } catch (e) { console.error("ELO update failed:", e); }
@@ -73,26 +86,9 @@ function RivalContact({ name, inscriptions, logoMap, onClose }) {
           <TeamLogo name={name} logoUrl={logoMap[name]} size={52} />
           <div><h3 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 700 }}>{name}</h3>{insc?.userName && <p style={{ margin: 0, color: C.muted, fontSize: 12 }}>{insc.userName}</p>}</div>
         </div>
-        {insc?.phone && (
-          <a href={`https://wa.me/${insc.phone.replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", background: "rgba(37,211,102,0.1)", border: "1px solid rgba(37,211,102,0.25)", borderRadius: 10, marginBottom: 10, textDecoration: "none", color: C.text }}>
-            <span style={{ fontSize: 22 }}>💬</span>
-            <div><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600, color: "#25d366" }}>WhatsApp</p><p style={{ margin: 0, fontSize: 12, color: C.muted }}>{insc.phone}</p></div>
-            <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
-          </a>
-        )}
-        {insc?.twitter && (
-          <a href={`https://x.com/${insc.twitter.replace("@", "")}`} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, marginBottom: 10, textDecoration: "none", color: C.text }}>
-            <span style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>𝕏</span>
-            <div><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600 }}>X / Twitter</p><p style={{ margin: 0, fontSize: 12, color: C.muted }}>{insc.twitter}</p></div>
-            <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
-          </a>
-        )}
-        {insc?.managerId && (
-          <div style={{ padding: "10px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, marginBottom: 10 }}>
-            <p style={{ margin: "0 0 1px", fontSize: 11, color: C.muted, letterSpacing: 1 }}>ID MANAGER</p>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{insc.managerId}</p>
-          </div>
-        )}
+        {insc?.phone && <a href={`https://wa.me/${insc.phone.replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", background: "rgba(37,211,102,0.1)", border: "1px solid rgba(37,211,102,0.25)", borderRadius: 10, marginBottom: 10, textDecoration: "none", color: C.text }}><span style={{ fontSize: 22 }}>💬</span><div><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600, color: "#25d366" }}>WhatsApp</p><p style={{ margin: 0, fontSize: 12, color: C.muted }}>{insc.phone}</p></div><span style={{ marginLeft: "auto", color: C.faint }}>→</span></a>}
+        {insc?.twitter && <a href={`https://x.com/${insc.twitter.replace("@", "")}`} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, marginBottom: 10, textDecoration: "none", color: C.text }}><span style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>𝕏</span><div><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600 }}>X / Twitter</p><p style={{ margin: 0, fontSize: 12, color: C.muted }}>{insc.twitter}</p></div><span style={{ marginLeft: "auto", color: C.faint }}>→</span></a>}
+        {insc?.managerId && <div style={{ padding: "10px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, marginBottom: 10 }}><p style={{ margin: "0 0 1px", fontSize: 11, color: C.muted, letterSpacing: 1 }}>ID MANAGER</p><p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{insc.managerId}</p></div>}
         {!insc?.phone && !insc?.twitter && <p style={{ color: C.faint, fontSize: 13, textAlign: "center" }}>Sin datos de contacto.</p>}
         <button style={{ ...S.btnSm, width: "100%", marginTop: 8, textAlign: "center" }} onClick={onClose}>Cerrar</button>
       </div>
@@ -101,7 +97,7 @@ function RivalContact({ name, inscriptions, logoMap, onClose }) {
 }
 
 const statusLabel = { pendiente: "Sin jugar", parcial: "Esperando confirmación", conflicto: "Conflicto", validado: "Validado" };
-const statusIcon = { pendiente: "⏳", parcial: "🕐", conflicto: "⚠️", validado: "✓" };
+const statusIcon  = { pendiente: "⏳", parcial: "🕐", conflicto: "⚠️", validado: "✓" };
 
 export default function MatchesPanel({ tournaments, inscriptions, currentUser, isAdmin, logoMap, myTeamNames: myTeamNamesProp }) {
   const [filter, setFilter] = useState("todos");
@@ -118,9 +114,7 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
   function showNotif(msg, color = C.blue) { setNotif({ msg, color }); setTimeout(() => setNotif(null), 3500); }
   function toggleDay(key) { setExpandedDays(p => ({ ...p, [key]: !p[key] })); }
 
-  // myTeamNames can be passed in from parent (for logged-in user) or empty for public view
   const myTeamNames = myTeamNamesProp || new Set();
-
   const allDays = collectMatchdays(tournaments);
 
   const filteredDays = allDays.map(day => {
@@ -136,6 +130,8 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
     const t = tournaments.find(t => t.id === day.tournamentId);
     if (!t) return;
     const isValidated = updates.matchStatus === "validado";
+    const isElim = day.type === "elim";
+
     if (day.type === "group") {
       const newGroups = t.groups.map((g, gi) => {
         if (gi !== day.gi) return g;
@@ -161,7 +157,10 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
       }
       await updateDoc(doc(db, "tournaments", t.id), { eliminationRounds: finalRounds, ...(winner ? { winner, status: "Finalizado", finishedAt: new Date().toISOString() } : {}) });
     }
-    if (isValidated && updates.scoreA != null) await updateTeamElo(inscriptions, matchWithMi.teamA, matchWithMi.teamB, updates.scoreA, updates.scoreB);
+
+    if (isValidated && updates.scoreA != null) {
+      await updateTeamElo(inscriptions, matchWithMi.teamA, matchWithMi.teamB, updates.scoreA, updates.scoreB, day.tournamentType, day.numTeams, isElim);
+    }
   }
 
   async function submitReport(day, match) {
@@ -198,6 +197,7 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
       {notif && <div style={{ position: "fixed", top: 16, left: 16, right: 16, background: notif.color, color: [C.green, C.gold].includes(notif.color) ? "#07090f" : "#fff", padding: "13px 16px", zIndex: 9999, fontSize: 13, fontFamily: "'Georgia',serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", borderRadius: 10, textAlign: "center", fontWeight: 600 }}>{notif.msg}</div>}
       {rivalPopup && <RivalContact name={rivalPopup} inscriptions={inscriptions} logoMap={logoMap} onClose={() => setRivalPopup(null)} />}
 
+      {/* Report modal */}
       {reportMatch && reportDay && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ ...S.card, maxWidth: 380, width: "100%", padding: 24 }}>
@@ -223,6 +223,7 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
         </div>
       )}
 
+      {/* Admin validate modal */}
       {adminEdit && adminEditDay && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ ...S.card, maxWidth: 380, width: "100%", padding: 24 }}>
@@ -249,16 +250,20 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
         </div>
       )}
 
+      {/* Filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
         {FILTERS.map(f => <button key={f.id} onClick={() => setFilter(f.id)} style={{ ...S.btnSm, flexShrink: 0, borderColor: filter === f.id ? C.blue : undefined, color: filter === f.id ? C.blue : undefined, background: filter === f.id ? "rgba(79,142,247,0.08)" : undefined }}>{f.label}</button>)}
       </div>
 
-      {filteredDays.length === 0 ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay partidos en esta categoría.</div>
+      {filteredDays.length === 0
+        ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay partidos en esta categoría.</div>
         : filteredDays.map(day => {
+          const ttype = TOURNAMENT_TYPES[day.tournamentType] || TOURNAMENT_TYPES.rapido;
           const isOpen = expandedDays[day.key] !== false;
           const validatedCount = day.matches.filter(m => m.matchStatus === "validado").length;
-          const conflictCount = day.matches.filter(m => m.matchStatus === "conflicto").length;
+          const conflictCount  = day.matches.filter(m => m.matchStatus === "conflicto").length;
           const hasMyMatch = day.matches.some(m => myTeamNames.has(m.teamA) || myTeamNames.has(m.teamB));
+
           return (
             <div key={day.key} style={{ marginBottom: 10 }}>
               <div onClick={() => toggleDay(day.key)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: isOpen ? "12px 12px 0 0" : 12, cursor: "pointer", userSelect: "none" }}>
@@ -266,16 +271,20 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, fontWeight: 700 }}>{day.type === "group" ? `Jornada ${day.matchdayNum} · Grupo ${day.groupName}` : day.phase}</span>
                     <span style={{ fontSize: 10, color: C.muted }}>{day.tournamentName}</span>
+                    <span style={{ fontSize: 10 }}>{ttype.icon}</span>
                     {hasMyMatch && <span style={{ ...S.tag(C.gold), fontSize: 8 }}>Tu partido</span>}
                     {conflictCount > 0 && <span style={{ ...S.tag(C.red), fontSize: 8 }}>⚠️ {conflictCount}</span>}
                   </div>
-                  {day.datetime ? <p style={{ margin: "3px 0 0", fontSize: 11, color: C.blue }}>🕐 {formatDatetime(day.datetime)}</p> : <p style={{ margin: "3px 0 0", fontSize: 11, color: C.faint }}>Sin fecha</p>}
+                  {day.datetime
+                    ? <p style={{ margin: "3px 0 0", fontSize: 11, color: C.blue }}>🕐 {formatDatetime(day.datetime)}</p>
+                    : <p style={{ margin: "3px 0 0", fontSize: 11, color: C.faint }}>Sin fecha</p>}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                   <span style={{ fontSize: 11, color: C.muted }}>{validatedCount}/{day.matches.length} ✓</span>
                   <span style={{ color: C.faint, fontSize: 14 }}>{isOpen ? "▲" : "▼"}</span>
                 </div>
               </div>
+
               {isOpen && (
                 <div style={{ border: "1px solid rgba(255,255,255,0.07)", borderTop: "none", borderRadius: "0 0 12px 12px", overflow: "hidden" }}>
                   {day.matches.map((m, idx) => {
@@ -285,6 +294,7 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
                     const alreadyReported = (myTeamNames.has(m.teamA) && m.reportByA?.userId === currentUser?.uid) || (myTeamNames.has(m.teamB) && m.reportByB?.userId === currentUser?.uid);
                     const isMyMatch = myTeamNames.has(m.teamA) || myTeamNames.has(m.teamB);
                     const rivalName = isMyMatch ? (myTeamNames.has(m.teamA) ? m.teamB : m.teamA) : null;
+
                     return (
                       <div key={idx} style={{ padding: "14px", borderBottom: idx < day.matches.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", background: isMyMatch ? "rgba(232,184,75,0.03)" : "transparent" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -306,6 +316,7 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
                             <TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={32} />
                           </div>
                         </div>
+
                         {st === "parcial" && (
                           <div style={{ marginTop: 10, padding: "8px 10px", background: "rgba(247,147,79,0.08)", borderRadius: 8, border: "1px solid rgba(247,147,79,0.2)" }}>
                             {m.reportByA && <p style={{ margin: "0 0 2px", fontSize: 11, color: C.muted }}>{m.teamA}: <strong style={{ color: C.text }}>{m.reportByA.scoreA}–{m.reportByA.scoreB}</strong></p>}
@@ -321,6 +332,7 @@ export default function MatchesPanel({ tournaments, inscriptions, currentUser, i
                             <p style={{ margin: "5px 0 0", fontSize: 10, color: C.red }}>Un admin debe resolver este conflicto</p>
                           </div>
                         )}
+
                         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                           {canUserReport && <button style={{ ...S.btnInline(alreadyReported ? C.orange : C.blue), flex: 1 }} onClick={() => { setReportMatch(m); setReportDay(day); setRScoreA(""); setRScoreB(""); }}>{alreadyReported ? "Modificar resultado" : "Reportar resultado"}</button>}
                           {isAdmin && st !== "validado" && <button style={{ ...S.btnInline(st === "conflicto" ? C.red : C.blue), flex: 1 }} onClick={() => { setAdminEdit(m); setAdminEditDay(day); setAScoreA(m.scoreA != null ? String(m.scoreA) : ""); setAScoreB(m.scoreB != null ? String(m.scoreB) : ""); }}>{st === "conflicto" ? "⚠️ Resolver" : st === "parcial" ? "Validar" : "Introducir resultado"}</button>}
