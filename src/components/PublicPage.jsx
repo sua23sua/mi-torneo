@@ -1,22 +1,26 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, isTournamentActive } from "../shared.jsx";
+import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, isTournamentActive, TOURNAMENT_TYPES } from "../shared.jsx";
 import MatchesPanel from "./MatchesPanel.jsx";
 import RankingPanel from "./RankingPanel.jsx";
 import { NormativaView } from "./NormativaPanel.jsx";
 
-const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
-
 const TABS = [
-  { id: "torneos", icon: "🎮", label: "Torneos" },
-  { id: "partidos", icon: "⚽", label: "Partidos" },
-  { id: "ranking", icon: "📊", label: "Ranking" },
-  { id: "noticias", icon: "📰", label: "Noticias" },
+  { id: "torneos",   icon: "🎮", label: "Torneos" },
+  { id: "partidos",  icon: "⚽", label: "Partidos" },
+  { id: "ranking",   icon: "📊", label: "Ranking" },
+  { id: "noticias",  icon: "📰", label: "Noticias" },
   { id: "normativa", icon: "📋", label: "Normas" },
 ];
 
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+function formatDate(iso) {
+  if (!iso) return null;
+  try { return new Date(iso).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); }
+  catch { return iso; }
+}
 
 export default function PublicPage({ onLogin }) {
   const [tournaments, setTournaments] = useState([]);
@@ -41,7 +45,7 @@ export default function PublicPage({ onLogin }) {
   const logoMap = {};
   inscriptions.forEach(i => { if (i.teamName && i.logoUrl) logoMap[i.teamName] = i.logoUrl; });
 
-  const activeTournaments = tournaments.filter(isTournamentActive);
+  const activeTournaments  = tournaments.filter(isTournamentActive);
   const historyTournaments = tournaments.filter(t => !isTournamentActive(t));
   const filteredHistory = historyTournaments.filter(t => {
     const d = new Date(t.finishedAt || t.createdAt);
@@ -54,37 +58,46 @@ export default function PublicPage({ onLogin }) {
   }
 
   function TournamentCard({ t }) {
+    const ttype = TOURNAMENT_TYPES[t.tournamentType] || TOURNAMENT_TYPES.rapido;
     const isExpanded = expandedTId === t.id;
     const hasGroups = t.groups?.length > 0;
-    const hasElim = t.eliminationRounds?.length > 0;
-    const schedule = t.matchdaySchedule || {};
-    const upcoming = Object.values(schedule).filter(d => d && new Date(d) > new Date()).sort()[0];
+    const hasElim   = t.eliminationRounds?.length > 0;
     return (
       <div style={S.card}>
         <div style={{ display: "flex", alignItems: "start", gap: 12, marginBottom: 12 }}>
-          <div style={{ width: 44, height: 44, background: "rgba(232,184,75,0.08)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎮</div>
+          <div style={{ width: 44, height: 44, background: `${ttype.color}14`, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{ttype.icon}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
-            <p style={{ margin: "0 0 5px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
-            {upcoming && <p style={{ margin: "0 0 5px", fontSize: 12, color: C.blue }}>🕐 Próx. jornada: {formatDatetime(upcoming)}</p>}
-            {t.winner && <p style={{ margin: "0 0 5px", color: C.gold, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>🏆 <TRow name={t.winner} size={18} /></p>}
+            <p style={{ margin: "0 0 4px", color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {t.teams?.length || 0} equipos</p>
+            {t.startDate && <p style={{ margin: "0 0 5px", fontSize: 12, color: C.blue }}>📅 {formatDate(t.startDate)}</p>}
+            {t.winner && <p style={{ margin: "0 0 5px", color: C.gold, fontSize: 12 }}>🏆 <TRow name={t.winner} size={16} /></p>}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span style={S.tag(statusColor[t.status] || "#6b7a90")}>{t.status}</span>
+              <span style={{ fontSize: 9, color: ttype.color, letterSpacing: 1, textTransform: "uppercase", padding: "3px 0" }}>{ttype.label}</span>
             </div>
           </div>
         </div>
+
         <div style={{ display: "flex", gap: 8 }}>
-          {t.status === "Abierto" && <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={onLogin}>Inscribirse</button>}
-          {(hasGroups || hasElim) && <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>{isExpanded ? "Ocultar ▲" : "Ver clasificación ▼"}</button>}
-          {t.whatsappLink && <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ ...S.btnInline("#25d366"), textDecoration: "none", display: "flex", alignItems: "center" }}>💬</a>}
+          {t.status === "Abierto" && (
+            <button style={{ ...S.btnInline(C.gold), flex: 1 }} onClick={onLogin}>
+              Inscribirse →
+            </button>
+          )}
+          {(hasGroups || hasElim) && (
+            <button style={{ ...S.btnSm, flex: 1 }} onClick={() => setExpandedTId(isExpanded ? null : t.id)}>
+              {isExpanded ? "Ocultar ▲" : "Ver clasificación ▼"}
+            </button>
+          )}
         </div>
+
         {isExpanded && (
           <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 16 }}>
             {hasGroups && t.groups.map((g, gi) => (
               <div key={gi} style={{ marginBottom: 16 }}>
                 <p style={{ ...S.sectionTitle, color: C.gold }}>Grupo {g.name}</p>
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ minWidth: 240, marginBottom: 6 }}>
+                  <table style={{ minWidth: 240 }}>
                     <thead><tr>{["", "Equipo", "PJ", "PTS", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                     <tbody>{g.standings.map((s, si) => (
                       <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}>
@@ -117,6 +130,8 @@ export default function PublicPage({ onLogin }) {
     );
   }
 
+  const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
+
   return (
     <div style={S.wrap}>
       <style>{`*{box-sizing:border-box;}table{border-collapse:collapse;width:100%;}body{overscroll-behavior-y:contain;}`}</style>
@@ -138,11 +153,17 @@ export default function PublicPage({ onLogin }) {
                 <button key={id} onClick={() => setTourneySubTab(id)} style={{ flex: 1, padding: "12px 8px", background: tourneySubTab === id ? "rgba(232,184,75,0.1)" : "transparent", border: "none", borderRight: id === "activos" ? "1px solid rgba(255,255,255,0.08)" : "none", color: tourneySubTab === id ? C.gold : C.muted, cursor: "pointer", fontSize: 12, fontWeight: tourneySubTab === id ? 700 : 400, fontFamily: "'Georgia',serif", letterSpacing: 1 }}>{label}</button>
               ))}
             </div>
+
             {tourneySubTab === "activos" && (
               activeTournaments.length === 0
-                ? <div style={{ ...S.card, textAlign: "center", padding: 48 }}><div style={{ fontSize: 40, marginBottom: 12 }}>🎮</div><p style={{ color: C.muted, marginBottom: 16 }}>No hay torneos activos</p><button style={S.btn(C.gold)} onClick={onLogin}>Regístrate para competir →</button></div>
+                ? <div style={{ ...S.card, textAlign: "center", padding: 48 }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>🎮</div>
+                    <p style={{ color: C.muted, marginBottom: 16 }}>No hay torneos activos</p>
+                    <button style={S.btn(C.gold)} onClick={onLogin}>Regístrate para competir →</button>
+                  </div>
                 : activeTournaments.map(t => <TournamentCard key={t.id} t={t} />)
             )}
+
             {tourneySubTab === "historial" && (
               <div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -156,7 +177,8 @@ export default function PublicPage({ onLogin }) {
                 <input style={{ ...S.input, marginBottom: 12, fontSize: 14 }} placeholder="Buscar por nombre..." value={histSearch} onChange={e => setHistSearch(e.target.value)} />
                 {filteredHistory.length === 0
                   ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: C.faint }}>No hay torneos en {MONTHS[histMonth]} {histYear}.</div>
-                  : filteredHistory.map(t => <TournamentCard key={t.id} t={t} />)}
+                  : filteredHistory.map(t => <TournamentCard key={t.id} t={t} />)
+                }
               </div>
             )}
           </>
