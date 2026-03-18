@@ -15,33 +15,19 @@ export const matchStatusColor = {
 
 // ── Tournament types ──────────────────────────────────────────────
 export const TOURNAMENT_TYPES = {
-  rapido:  { id: "rapido",  label: "Torneo rápido",         icon: "🏃", kBase: 16, color: "#52d68a",  desc: "Un día o fin de semana" },
-  semanal: { id: "semanal", label: "Torneo semanal",        icon: "🌟", kBase: 24, color: "#4f8ef7",  desc: "Duración de una semana, más especial" },
-  liga:    { id: "liga",    label: "Liga / Copa temporada", icon: "🏆", kBase: 40, color: "#e8b84b",  desc: "Varias jornadas, máximo peso" },
+  rapido:  { id: "rapido",  label: "Torneo rápido",         icon: "🏃", kBase: 16, color: "#52d68a", desc: "Un día o fin de semana" },
+  semanal: { id: "semanal", label: "Torneo semanal",        icon: "🌟", kBase: 24, color: "#4f8ef7", desc: "Duración de una semana, más especial" },
+  liga:    { id: "liga",    label: "Liga / Copa temporada", icon: "🏆", kBase: 40, color: "#e8b84b", desc: "Varias jornadas, máximo peso" },
 };
 
-// ── ELO constants ─────────────────────────────────────────────────
+// ── ELO ──────────────────────────────────────────────────────────
 export const ELO_DEFAULT = 1000;
-export const ELO_PROVISIONAL_GAMES = 10; // first N games use double K
+export const ELO_PROVISIONAL_GAMES = 10;
 
-/**
- * Calculate the effective K factor for a match.
- *
- * @param {number} kBase        - Base K from tournament type (16 / 24 / 40)
- * @param {number} numTeams     - Total teams in the tournament
- * @param {boolean} isElim      - Whether it's an elimination-phase match
- * @param {number} gamesPlayed  - Total games played by the team so far (for provisional period)
- */
 export function effectiveK(kBase, numTeams = 8, isElim = false, gamesPlayed = 999) {
-  // Scale by tournament size relative to baseline of 8 teams
   const sizeMultiplier = Math.sqrt(Math.max(numTeams, 2) / 8);
-
-  // Elimination rounds get a 25% bonus (higher pressure)
   const elimBonus = isElim ? 1.25 : 1.0;
-
-  // Provisional period: first 10 games double K so ELO converges faster
   const provisionalMultiplier = gamesPlayed < ELO_PROVISIONAL_GAMES ? 2.0 : 1.0;
-
   return Math.round(kBase * sizeMultiplier * elimBonus * provisionalMultiplier);
 }
 
@@ -49,10 +35,6 @@ export function expectedScore(eloA, eloB) {
   return 1 / (1 + Math.pow(10, (eloB - eloA) / 400));
 }
 
-/**
- * Calculate ELO change for team A.
- * result: 1 = win, 0.5 = draw, 0 = loss
- */
 export function calcEloChange(eloA, eloB, result, kBase, numTeams, isElim, gamesPlayedA) {
   const K = effectiveK(kBase, numTeams, isElim, gamesPlayedA);
   return Math.round(K * (result - expectedScore(eloA, eloB)));
@@ -63,14 +45,47 @@ export function eloLabel(elo) {
   if (elo >= 1250) return { label: "Oro",    color: C.gold };
   if (elo >= 1100) return { label: "Plata",  color: "#94a3b8" };
   if (elo >= 950)  return { label: "Bronce", color: "#b87333" };
-  return                 { label: "Hierro", color: C.muted };
+  return                  { label: "Hierro", color: C.muted };
 }
 
 export function eloTierIcon(elo) {
   return { Élite: "💎", Oro: "🥇", Plata: "🥈", Bronce: "🥉", Hierro: "⚙️" }[eloLabel(elo).label] || "⚙️";
 }
 
-// ── Round-robin matchday algorithm ────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────
+export function getRoundName(totalRounds, roundIdx) {
+  if (totalRounds === 1) return "Final";
+  const remaining = totalRounds - roundIdx;
+  return ["Final", "Semifinal", "Cuartos de final", "Octavos de final", "Ronda 1"][Math.min(remaining - 1, 4)] || `Ronda ${roundIdx + 1}`;
+}
+
+export function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
+
+export function formatDatetime(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch { return iso; }
+}
+
+export function isTournamentActive(t) {
+  if (t.status === "Abierto" || t.status === "En curso") return true;
+  if (t.status === "Finalizado" || t.status === "Cerrado") {
+    const updated = t.finishedAt || t.createdAt;
+    return (Date.now() - new Date(updated).getTime()) < 14 * 24 * 60 * 60 * 1000;
+  }
+  return false;
+}
+
+// ── Match builders ────────────────────────────────────────────────
+export function makeMatch(teamA, teamB, leg = 1, matchday = 1) {
+  return { teamA, teamB, leg, matchday, scoreA: null, scoreB: null, played: false, reportByA: null, reportByB: null, matchStatus: "pendiente", winner: null };
+}
+
+export function makeElimMatch(teamA, teamB) {
+  return { teamA, teamB, scoreA: null, scoreB: null, winner: null, reportByA: null, reportByB: null, matchStatus: "pendiente" };
+}
+
 function roundRobinMatchdays(teams) {
   const list = [...teams];
   if (list.length % 2 !== 0) list.push("BYE");
@@ -86,14 +101,6 @@ function roundRobinMatchdays(teams) {
     t.splice(1, 0, t.pop());
   }
   return matchdays;
-}
-
-export function makeMatch(teamA, teamB, leg = 1, matchday = 1) {
-  return { teamA, teamB, leg, matchday, scoreA: null, scoreB: null, played: false, reportByA: null, reportByB: null, matchStatus: "pendiente", winner: null };
-}
-
-export function makeElimMatch(teamA, teamB) {
-  return { teamA, teamB, scoreA: null, scoreB: null, winner: null, reportByA: null, reportByB: null, matchStatus: "pendiente" };
 }
 
 export function buildGroups(teams, groupCount, legs = 1) {
@@ -154,40 +161,37 @@ export function buildEliminationRound(teams) {
   return matches;
 }
 
-export function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
-
 export function computeMatchStatus(match, side, scoreA, scoreB) {
   const other = side === "A" ? match.reportByB : match.reportByA;
   if (!other) return "parcial";
   return (other.scoreA === scoreA && other.scoreB === scoreB) ? "validado" : "conflicto";
 }
 
-export function formatDatetime(iso) {
-  if (!iso) return null;
-  try { return new Date(iso).toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
-  catch { return iso; }
-}
-
-export function isTournamentActive(t) {
-  if (t.status === "Abierto" || t.status === "En curso") return true;
-  if (t.status === "Finalizado" || t.status === "Cerrado") {
-    const updated = t.finishedAt || t.createdAt;
-    return (Date.now() - new Date(updated).getTime()) < 14 * 24 * 60 * 60 * 1000;
-  }
-  return false;
-}
-
+// ── UI Components ─────────────────────────────────────────────────
 export function TeamLogo({ name, logoUrl, size = 28 }) {
   if (!name) return null;
-  if (logoUrl) return <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }} onError={e => { e.target.style.display = "none"; }} />;
+  if (logoUrl) {
+    return (
+      <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }}
+        onError={e => { e.target.style.display = "none"; }} />
+    );
+  }
   const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
-  return <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0, background: `hsl(${hue},45%,28%)`, border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.max(size * 0.38, 10), fontWeight: 700, color: "#e8edf4", fontFamily: "'Georgia',serif" }}>{name.charAt(0).toUpperCase()}</div>;
+  return (
+    <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0, background: `hsl(${hue},45%,28%)`, border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.max(size * 0.38, 10), fontWeight: 700, color: "#e8edf4", fontFamily: "'Georgia',serif" }}>
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
 }
 
 export function EloBar({ elo }) {
   const pct = Math.min(100, Math.max(0, ((elo - 600) / 900) * 100));
   const { color } = eloLabel(elo);
-  return <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} /></div>;
+  return (
+    <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+      <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} />
+    </div>
+  );
 }
 
 export function BottomNav({ tabs, active, onChange, color = C.gold }) {
@@ -197,7 +201,9 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
         <button key={t.id} onClick={() => onChange(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "10px 2px 8px", background: "none", border: "none", cursor: "pointer", color: active === t.id ? color : C.muted, fontFamily: "'Georgia',serif", transition: "color .15s", minWidth: 0, position: "relative" }}>
           <span style={{ fontSize: 19, lineHeight: 1 }}>{t.icon}</span>
           <span style={{ fontSize: 9, letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1, whiteSpace: "nowrap" }}>{t.label}</span>
-          {t.badge > 0 && <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>}
+          {t.badge > 0 && (
+            <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>
+          )}
         </button>
       ))}
     </nav>
