@@ -8,12 +8,12 @@ import RankingPanel from "./RankingPanel.jsx";
 import { NormativaEditor } from "./NormativaPanel.jsx";
 
 const TABS = [
-  { id: "torneos",      icon: "🎮", label: "Torneos" },
-  { id: "partidos",     icon: "⚽", label: "Partidos" },
-  { id: "ranking",      icon: "📊", label: "Ranking" },
-  { id: "inscripciones",icon: "📝", label: "Inscripciones" },
-  { id: "noticias",     icon: "📰", label: "Noticias" },
-  { id: "normativa",    icon: "📋", label: "Normas" },
+  { id: "torneos",       icon: "🎮", label: "Torneos" },
+  { id: "partidos",      icon: "⚽", label: "Partidos" },
+  { id: "ranking",       icon: "📊", label: "Ranking" },
+  { id: "inscripciones", icon: "📝", label: "Inscripciones" },
+  { id: "noticias",      icon: "📰", label: "Noticias" },
+  { id: "normativa",     icon: "📋", label: "Normas" },
 ];
 
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -24,7 +24,7 @@ export default function AdminDashboard({ onLogout }) {
   const [tournaments, setTournaments] = useState([]);
   const [inscriptions, setInscriptions] = useState([]);
   const [news, setNews] = useState([]);
-  const [view, setView] = useState("list");
+  const [view, setView] = useState("list"); // list | new | detail | schedule | editconfig
   const [activeTId, setActiveTId] = useState(null);
   const [notif, setNotif] = useState(null);
   const [newsForm, setNewsForm] = useState({ title: "", body: "", category: "Noticia" });
@@ -32,6 +32,11 @@ export default function AdminDashboard({ onLogout }) {
   const [form, setForm] = useState({
     name: "", format: "Liga", groupCount: 2, qualify: 2,
     description: "", legs: 1, whatsappLink: "",
+    multiDate: false, tournamentType: "rapido",
+  });
+  // Edit config form — separate state so it doesn't interfere with create form
+  const [editForm, setEditForm] = useState({
+    format: "Liga", groupCount: 2, qualify: 2, legs: 1,
     multiDate: false, tournamentType: "rapido",
   });
   const [showInscModal, setShowInscModal] = useState(false);
@@ -48,6 +53,7 @@ export default function AdminDashboard({ onLogout }) {
 
   function showNotif(msg) { setNotif(msg); setTimeout(() => setNotif(null), 3000); }
   function F(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  function EF(k, v) { setEditForm(p => ({ ...p, [k]: v })); }
 
   useEffect(() => {
     const u1 = onSnapshot(query(collection(db, "tournaments"), orderBy("createdAt", "desc")), snap => setTournaments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -60,6 +66,18 @@ export default function AdminDashboard({ onLogout }) {
     if (view === "schedule" && activeTId) {
       const t = tournaments.find(t => t.id === activeTId);
       if (t) setScheduleEdits(t.matchdaySchedule || {});
+    }
+    // Pre-fill edit form when entering editconfig view
+    if (view === "editconfig" && activeTId) {
+      const t = tournaments.find(t => t.id === activeTId);
+      if (t) setEditForm({
+        format: t.format || "Liga",
+        groupCount: t.groupCount || 2,
+        qualify: t.qualify || 2,
+        legs: t.legs || 1,
+        multiDate: t.multiDate || false,
+        tournamentType: t.tournamentType || "rapido",
+      });
     }
   }, [view, activeTId]);
 
@@ -96,6 +114,20 @@ export default function AdminDashboard({ onLogout }) {
     });
     setForm({ name: "", format: "Liga", groupCount: 2, qualify: 2, description: "", legs: 1, whatsappLink: "", multiDate: false, tournamentType: "rapido" });
     setView("list"); showNotif("Torneo creado ✓");
+  }
+
+  async function saveEditConfig() {
+    if (!activeTId) return;
+    await updateDoc(doc(db, "tournaments", activeTId), {
+      format: editForm.format,
+      groupCount: parseInt(editForm.groupCount),
+      qualify: parseInt(editForm.qualify),
+      legs: parseInt(editForm.legs),
+      multiDate: editForm.multiDate,
+      tournamentType: editForm.tournamentType,
+    });
+    setView("detail");
+    showNotif("Configuración actualizada ✓");
   }
 
   async function startTournament(t) {
@@ -156,6 +188,12 @@ export default function AdminDashboard({ onLogout }) {
   const catColor = { Noticia: C.blue, Resultado: C.green, Convocatoria: C.gold, Aviso: C.red };
   const scheduleMatchdays = activeTournament ? collectMatchdays([activeTournament]) : [];
 
+  // Back button logic depending on current view
+  function handleBack() {
+    if (view === "schedule" || view === "editconfig") setView("detail");
+    else setView("list");
+  }
+
   function TournamentCard({ t }) {
     const ttype = TOURNAMENT_TYPES[t.tournamentType] || TOURNAMENT_TYPES.rapido;
     const tConflicts = [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])].filter(m => m.matchStatus === "conflicto").length;
@@ -175,6 +213,84 @@ export default function AdminDashboard({ onLogout }) {
         <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700 }}>{t.name}</h3>
         <p style={{ margin: 0, color: C.muted, fontSize: 12 }}>{t.format} · {t.legs > 1 ? "2 vueltas" : "1 vuelta"} · {tInsc} equipos · K={ttype.kBase}</p>
         {t.winner && <p style={{ margin: "6px 0 0", color: C.gold, fontSize: 12 }}>🏆 {t.winner}</p>}
+      </div>
+    );
+  }
+
+  // Reusable config form — used both for create and edit
+  function ConfigForm({ values, onChange, showNameDesc = false }) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {showNameDesc && <>
+          <div><label style={S.label}>Nombre</label><input style={S.input} placeholder="Copa de Campeones 2026" value={values.name} onChange={e => onChange("name", e.target.value)} /></div>
+          <div><label style={S.label}>Descripción</label><input style={S.input} placeholder="Opcional..." value={values.description} onChange={e => onChange("description", e.target.value)} /></div>
+          <div><label style={S.label}>Enlace grupo WhatsApp</label><input style={S.input} placeholder="https://chat.whatsapp.com/..." value={values.whatsappLink} onChange={e => onChange("whatsappLink", e.target.value)} /></div>
+        </>}
+
+        {/* Tournament type */}
+        <div>
+          <label style={S.label}>Tipo de torneo · factor K ELO</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Object.values(TOURNAMENT_TYPES).map(tt => (
+              <button key={tt.id} onClick={() => onChange("tournamentType", tt.id)} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${values.tournamentType === tt.id ? tt.color : "rgba(255,255,255,0.09)"}`, background: values.tournamentType === tt.id ? `${tt.color}14` : "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: "'Georgia',serif", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 22, flexShrink: 0 }}>{tt.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700, color: values.tournamentType === tt.id ? tt.color : C.text }}>{tt.label}</p>
+                  <p style={{ margin: 0, fontSize: 11, color: C.muted }}>{tt.desc}</p>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 700, color: values.tournamentType === tt.id ? tt.color : C.muted }}>K={tt.kBase}</p>
+                  <p style={{ margin: 0, fontSize: 9, color: C.faint, letterSpacing: 1 }}>BASE</p>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 10, padding: "10px 14px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
+            <p style={{ margin: "0 0 4px", fontSize: 11, color: C.muted }}>
+              💡 <strong style={{ color: C.text }}>K efectiva</strong> = K base × √(equipos/8) × 1.25 en eliminatoria × 2 primeros 10 partidos
+            </p>
+            <p style={{ margin: 0, fontSize: 11, color: C.faint }}>
+              Ejemplo con {TOURNAMENT_TYPES[values.tournamentType].kBase} base y 16 equipos: K≈{Math.round(TOURNAMENT_TYPES[values.tournamentType].kBase * Math.sqrt(16/8))} en grupos · K≈{Math.round(TOURNAMENT_TYPES[values.tournamentType].kBase * Math.sqrt(16/8) * 1.25)} en eliminatoria
+            </p>
+          </div>
+        </div>
+
+        {/* Format */}
+        <div>
+          <label style={S.label}>Formato</label>
+          {[["Liga", "🏆"], ["Eliminatoria", "⚔"], ["Grupos + Eliminatoria", "🎯"]].map(([f, icon]) => (
+            <button key={f} onClick={() => onChange("format", f)} style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: `1px solid ${values.format === f ? C.blue : "rgba(255,255,255,0.09)"}`, background: values.format === f ? "rgba(79,142,247,0.1)" : "rgba(255,255,255,0.02)", color: values.format === f ? C.blue : C.muted, cursor: "pointer", fontSize: 14, fontFamily: "'Georgia',serif", textAlign: "left", display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+              <span style={{ fontSize: 20 }}>{icon}</span> {f}
+            </button>
+          ))}
+        </div>
+
+        {(values.format === "Liga" || values.format === "Grupos + Eliminatoria") && (
+          <div>
+            <label style={S.label}>Vueltas</label>
+            <div style={{ display: "flex", gap: 10 }}>
+              {[[1, "⭕ Una vuelta"], [2, "🔄 Doble vuelta"]].map(([l, label]) => (
+                <button key={l} onClick={() => onChange("legs", l)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${values.legs === l ? C.gold : "rgba(255,255,255,0.09)"}`, background: values.legs === l ? "rgba(232,184,75,0.1)" : "rgba(255,255,255,0.02)", color: values.legs === l ? C.gold : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {values.format === "Grupos + Eliminatoria" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div><label style={S.label}>Nº grupos</label><input style={S.input} type="number" min={2} max={8} value={values.groupCount} onChange={e => onChange("groupCount", +e.target.value)} /></div>
+            <div><label style={S.label}>Clasificados/grupo</label><input style={S.input} type="number" min={1} max={4} value={values.qualify} onChange={e => onChange("qualify", +e.target.value)} /></div>
+          </div>
+        )}
+
+        <div>
+          <label style={S.label}>Duración</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[[false, "📅 Un solo día"], [true, "🗓 Varias fechas"]].map(([val, label]) => (
+              <button key={String(val)} onClick={() => onChange("multiDate", val)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${values.multiDate === val ? C.purple : "rgba(255,255,255,0.09)"}`, background: values.multiDate === val ? "rgba(167,139,250,0.1)" : "rgba(255,255,255,0.02)", color: values.multiDate === val ? C.purple : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>{label}</button>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -207,7 +323,9 @@ export default function AdminDashboard({ onLogout }) {
 
       <header style={S.topBar}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {view !== "list" && tab === "torneos" && <button onClick={() => setView(view === "schedule" ? "detail" : "list")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 16, padding: "0 8px 0 0" }}>←</button>}
+          {view !== "list" && tab === "torneos" && (
+            <button onClick={handleBack} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 16, padding: "0 8px 0 0" }}>←</button>
+          )}
           <div style={{ width: 28, height: 28, background: "linear-gradient(135deg,#4f8ef7,#2a6fd4)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>⚔</div>
           <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.blue }}>Admin</span>
         </div>
@@ -222,6 +340,7 @@ export default function AdminDashboard({ onLogout }) {
         {/* ══ TORNEOS ══ */}
         {tab === "torneos" && (
           <>
+            {/* List */}
             {view === "list" && (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -257,85 +376,37 @@ export default function AdminDashboard({ onLogout }) {
               </>
             )}
 
+            {/* New tournament */}
             {view === "new" && (
               <>
                 <p style={S.pageTitle}>Nuevo torneo</p>
                 <p style={S.pageSubtitle}>Los equipos se añaden mediante inscripciones</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                  <div><label style={S.label}>Nombre</label><input style={S.input} placeholder="Copa de Campeones 2026" value={form.name} onChange={e => F("name", e.target.value)} /></div>
-                  <div><label style={S.label}>Descripción</label><input style={S.input} placeholder="Opcional..." value={form.description} onChange={e => F("description", e.target.value)} /></div>
-                  <div><label style={S.label}>Enlace grupo WhatsApp</label><input style={S.input} placeholder="https://chat.whatsapp.com/..." value={form.whatsappLink} onChange={e => F("whatsappLink", e.target.value)} /></div>
-
-                  {/* ── Tournament type ── */}
-                  <div>
-                    <label style={S.label}>Tipo de torneo · factor K ELO</label>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {Object.values(TOURNAMENT_TYPES).map(tt => (
-                        <button key={tt.id} onClick={() => F("tournamentType", tt.id)} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${form.tournamentType === tt.id ? tt.color : "rgba(255,255,255,0.09)"}`, background: form.tournamentType === tt.id ? `${tt.color}14` : "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: "'Georgia',serif", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
-                          <span style={{ fontSize: 22, flexShrink: 0 }}>{tt.icon}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700, color: form.tournamentType === tt.id ? tt.color : C.text }}>{tt.label}</p>
-                            <p style={{ margin: 0, fontSize: 11, color: C.muted }}>{tt.desc}</p>
-                          </div>
-                          <div style={{ textAlign: "right", flexShrink: 0 }}>
-                            <p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 700, color: form.tournamentType === tt.id ? tt.color : C.muted }}>K={tt.kBase}</p>
-                            <p style={{ margin: 0, fontSize: 9, color: C.faint, letterSpacing: 1 }}>BASE</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: 10, padding: "10px 14px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
-                      <p style={{ margin: "0 0 4px", fontSize: 11, color: C.muted }}>
-                        💡 <strong style={{ color: C.text }}>K efectiva</strong> = K base × √(equipos/8) × 1.25 en eliminatoria × 2 primeros 10 partidos
-                      </p>
-                      <p style={{ margin: 0, fontSize: 11, color: C.faint }}>
-                        Ejemplo con {TOURNAMENT_TYPES[form.tournamentType].kBase} base y 16 equipos: K≈{Math.round(TOURNAMENT_TYPES[form.tournamentType].kBase * Math.sqrt(16/8))} en grupos · K≈{Math.round(TOURNAMENT_TYPES[form.tournamentType].kBase * Math.sqrt(16/8) * 1.25)} en eliminatoria
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* ── Format ── */}
-                  <div>
-                    <label style={S.label}>Formato</label>
-                    {[["Liga", "🏆"], ["Eliminatoria", "⚔"], ["Grupos + Eliminatoria", "🎯"]].map(([f, icon]) => (
-                      <button key={f} onClick={() => F("format", f)} style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: `1px solid ${form.format === f ? C.blue : "rgba(255,255,255,0.09)"}`, background: form.format === f ? "rgba(79,142,247,0.1)" : "rgba(255,255,255,0.02)", color: form.format === f ? C.blue : C.muted, cursor: "pointer", fontSize: 14, fontFamily: "'Georgia',serif", textAlign: "left", display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                        <span style={{ fontSize: 20 }}>{icon}</span> {f}
-                      </button>
-                    ))}
-                  </div>
-
-                  {(form.format === "Liga" || form.format === "Grupos + Eliminatoria") && (
-                    <div>
-                      <label style={S.label}>Vueltas</label>
-                      <div style={{ display: "flex", gap: 10 }}>
-                        {[[1, "⭕ Una vuelta"], [2, "🔄 Doble vuelta"]].map(([l, label]) => (
-                          <button key={l} onClick={() => F("legs", l)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.legs === l ? C.gold : "rgba(255,255,255,0.09)"}`, background: form.legs === l ? "rgba(232,184,75,0.1)" : "rgba(255,255,255,0.02)", color: form.legs === l ? C.gold : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>{label}</button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {form.format === "Grupos + Eliminatoria" && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <div><label style={S.label}>Nº grupos</label><input style={S.input} type="number" min={2} max={8} value={form.groupCount} onChange={e => F("groupCount", e.target.value)} /></div>
-                      <div><label style={S.label}>Clasificados/grupo</label><input style={S.input} type="number" min={1} max={4} value={form.qualify} onChange={e => F("qualify", e.target.value)} /></div>
-                    </div>
-                  )}
-
-                  <div>
-                    <label style={S.label}>Duración</label>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      {[[false, "📅 Un solo día"], [true, "🗓 Varias fechas"]].map(([val, label]) => (
-                        <button key={String(val)} onClick={() => F("multiDate", val)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, border: `1px solid ${form.multiDate === val ? C.purple : "rgba(255,255,255,0.09)"}`, background: form.multiDate === val ? "rgba(167,139,250,0.1)" : "rgba(255,255,255,0.02)", color: form.multiDate === val ? C.purple : C.muted, cursor: "pointer", fontSize: 13, fontFamily: "'Georgia',serif" }}>{label}</button>
-                      ))}
-                    </div>
-                  </div>
-
+                <ConfigForm values={form} onChange={F} showNameDesc={true} />
+                <div style={{ marginTop: 18 }}>
                   <button style={S.btn()} onClick={createTournament}>Crear torneo →</button>
                 </div>
               </>
             )}
 
+            {/* Edit config — only for open tournaments with no brackets yet */}
+            {view === "editconfig" && activeTournament && (
+              <>
+                <p style={S.pageTitle}>Editar configuración</p>
+                <p style={S.pageSubtitle}>{activeTournament.name}</p>
+                <div style={{ ...S.card, background: "rgba(232,184,75,0.06)", border: "1px solid rgba(232,184,75,0.2)", marginBottom: 16 }}>
+                  <p style={{ margin: 0, fontSize: 12, color: C.gold }}>
+                    ⚠️ Solo puedes editar la configuración mientras el torneo está <strong>Abierto</strong> y aún no se han generado grupos ni enfrentamientos.
+                  </p>
+                </div>
+                <ConfigForm values={editForm} onChange={EF} showNameDesc={false} />
+                <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
+                  <button style={{ ...S.btn(), flex: 1 }} onClick={saveEditConfig}>Guardar cambios →</button>
+                  <button style={S.btnSm} onClick={() => setView("detail")}>Cancelar</button>
+                </div>
+              </>
+            )}
+
+            {/* Schedule */}
             {view === "schedule" && activeTournament && (
               <>
                 <p style={S.pageTitle}>Horario de jornadas</p>
@@ -357,6 +428,7 @@ export default function AdminDashboard({ onLogout }) {
               </>
             )}
 
+            {/* Detail */}
             {view === "detail" && activeTournament && (() => {
               const t = activeTournament;
               const ttype = TOURNAMENT_TYPES[t.tournamentType] || TOURNAMENT_TYPES.rapido;
@@ -365,7 +437,9 @@ export default function AdminDashboard({ onLogout }) {
               const approvedInsc = inscriptions.filter(i => i.tournamentId === t.id && i.status === "aprobada");
               const pendingInsc  = inscriptions.filter(i => i.tournamentId === t.id && i.status === "pendiente");
               const canStart  = t.status === "Abierto" && approvedInsc.length >= 2 && !hasGroups && !hasElim;
+              const canEdit   = t.status === "Abierto" && !hasGroups && !hasElim;
               const canReset  = hasGroups || hasElim || t.status !== "Abierto";
+
               return (
                 <div>
                   <div style={{ marginBottom: 12 }}>
@@ -381,23 +455,35 @@ export default function AdminDashboard({ onLogout }) {
                     {t.winner && <p style={{ margin: "4px 0", color: C.gold }}>🏆 {t.winner}</p>}
                   </div>
 
+                  {/* WhatsApp */}
                   <div style={{ ...S.card, marginBottom: 12 }}>
                     <p style={{ ...S.label, marginBottom: 8 }}>Grupo de WhatsApp</p>
                     {t.whatsappLink && <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 8 }}><span style={{ fontSize: 20 }}>💬</span><span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Unirse</span><span style={{ marginLeft: "auto", color: C.faint }}>→</span></a>}
                     <input style={{ ...S.input, fontSize: 14 }} placeholder="https://chat.whatsapp.com/..." defaultValue={t.whatsappLink || ""} onBlur={async e => { if (e.target.value !== (t.whatsappLink || "")) { await updateDoc(doc(db, "tournaments", t.id), { whatsappLink: e.target.value.trim() }); showNotif("Enlace actualizado ✓"); } }} />
                   </div>
 
+                  {/* Actions */}
                   <div style={{ overflowX: "auto", marginBottom: 14 }}>
                     <div style={{ display: "flex", gap: 8, width: "max-content" }}>
-                      {["Abierto", "En curso", "Finalizado", "Cerrado"].map(s => <button key={s} style={{ ...S.btnSm, borderColor: t.status === s ? statusColor[s] : undefined, color: t.status === s ? statusColor[s] : undefined }} onClick={() => updateDoc(doc(db, "tournaments", t.id), { status: s, ...(s === "Finalizado" ? { finishedAt: new Date().toISOString() } : {}) })}>{s}</button>)}
+                      {["Abierto", "En curso", "Finalizado", "Cerrado"].map(s => (
+                        <button key={s} style={{ ...S.btnSm, borderColor: t.status === s ? statusColor[s] : undefined, color: t.status === s ? statusColor[s] : undefined }} onClick={() => updateDoc(doc(db, "tournaments", t.id), { status: s, ...(s === "Finalizado" ? { finishedAt: new Date().toISOString() } : {}) })}>{s}</button>
+                      ))}
                       <button style={{ ...S.btnSm, borderColor: "rgba(79,142,247,0.4)", color: C.blue }} onClick={() => { setInscTarget(t); setShowInscModal(true); }}>+ Equipo</button>
+                      {canEdit && (
+                        <button style={{ ...S.btnSm, borderColor: "rgba(167,139,250,0.4)", color: C.purple }} onClick={() => setView("editconfig")}>✏ Configuración</button>
+                      )}
                       {(hasGroups || hasElim) && <button style={{ ...S.btnSm, borderColor: "rgba(232,184,75,0.4)", color: C.gold }} onClick={() => setView("schedule")}>🕐 Horarios</button>}
                       {canReset && <button style={{ ...S.btnSm, borderColor: "rgba(167,139,250,0.4)", color: C.purple, opacity: resetting ? 0.6 : 1 }} onClick={() => resetTournament(t)} disabled={resetting}>🔄 Reiniciar</button>}
                       <button style={S.btnDanger} onClick={async () => { if (!window.confirm("¿Eliminar torneo?")) return; await deleteDoc(doc(db, "tournaments", t.id)); setView("list"); }}>Eliminar</button>
                     </div>
                   </div>
 
-                  {canStart && <div style={{ background: "rgba(82,214,138,0.08)", border: "1px solid rgba(82,214,138,0.25)", borderRadius: 10, padding: 16, marginBottom: 14 }}><p style={{ margin: "0 0 10px", color: C.green, fontSize: 13 }}>✓ {approvedInsc.length} equipos listos · K efectiva ≈ {Math.round(ttype.kBase * Math.sqrt(approvedInsc.length / 8))}</p><button style={{ ...S.btn(C.green), color: "#07090f" }} onClick={() => startTournament(t)}>▶ Iniciar torneo</button></div>}
+                  {canStart && (
+                    <div style={{ background: "rgba(82,214,138,0.08)", border: "1px solid rgba(82,214,138,0.25)", borderRadius: 10, padding: 16, marginBottom: 14 }}>
+                      <p style={{ margin: "0 0 10px", color: C.green, fontSize: 13 }}>✓ {approvedInsc.length} equipos listos · K efectiva ≈ {Math.round(ttype.kBase * Math.sqrt(approvedInsc.length / 8))}</p>
+                      <button style={{ ...S.btn(C.green), color: "#07090f" }} onClick={() => startTournament(t)}>▶ Iniciar torneo</button>
+                    </div>
+                  )}
 
                   {pendingInsc.length > 0 && (
                     <div style={{ ...S.card, marginBottom: 14 }}>
@@ -433,7 +519,17 @@ export default function AdminDashboard({ onLogout }) {
                           <div style={{ overflowX: "auto" }}>
                             <table style={{ minWidth: 260 }}>
                               <thead><tr>{["#", "Equipo", "PJ", "PTS", "GF", "GC", "DG"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                              <tbody>{g.standings.map((s, si) => <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}><td style={{ ...S.td, color: C.faint }}>{si + 1}</td><td style={S.td}><TRow name={s.name} size={18} /></td><td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td><td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td><td style={{ ...S.td, textAlign: "center" }}>{s.gf}</td><td style={{ ...S.td, textAlign: "center" }}>{s.gc}</td><td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td></tr>)}</tbody>
+                              <tbody>{g.standings.map((s, si) => (
+                                <tr key={s.name} style={{ background: si < (t.qualify || 2) && t.format === "Grupos + Eliminatoria" ? "rgba(79,142,247,0.06)" : "transparent" }}>
+                                  <td style={{ ...S.td, color: C.faint }}>{si + 1}</td>
+                                  <td style={S.td}><TRow name={s.name} size={18} /></td>
+                                  <td style={{ ...S.td, textAlign: "center" }}>{s.pj}</td>
+                                  <td style={{ ...S.td, fontWeight: 700, textAlign: "center" }}>{s.pts}</td>
+                                  <td style={{ ...S.td, textAlign: "center" }}>{s.gf}</td>
+                                  <td style={{ ...S.td, textAlign: "center" }}>{s.gc}</td>
+                                  <td style={{ ...S.td, color: s.gd >= 0 ? C.green : C.red, textAlign: "center" }}>{s.gd > 0 ? "+" : ""}{s.gd}</td>
+                                </tr>
+                              ))}</tbody>
                             </table>
                           </div>
                         </div>
@@ -450,7 +546,13 @@ export default function AdminDashboard({ onLogout }) {
                       {t.eliminationRounds.map((round, ri) => (
                         <div key={ri} style={{ marginBottom: 10 }}>
                           <p style={{ ...S.label, color: C.gold, marginBottom: 6 }}>{getRoundName(t.eliminationRounds.length, ri)}</p>
-                          {round.matches.map((m, mi) => <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 5 }}><div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}><TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={20} /><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span></div><div style={{ minWidth: 54, textAlign: "center" }}>{m.matchStatus === "validado" ? <span style={{ fontWeight: 700, color: C.gold, fontSize: 14 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ ...S.tag(m.matchStatus === "conflicto" ? C.red : m.matchStatus === "parcial" ? C.orange : C.muted), fontSize: 8 }}>{m.matchStatus || "pdte"}</span>}</div><div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", minWidth: 0 }}><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span><TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={20} /></div></div>)}
+                          {round.matches.map((m, mi) => (
+                            <div key={mi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, marginBottom: 5 }}>
+                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}><TeamLogo name={m.teamA} logoUrl={logoMap[m.teamA]} size={20} /><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamA}</span></div>
+                              <div style={{ minWidth: 54, textAlign: "center" }}>{m.matchStatus === "validado" ? <span style={{ fontWeight: 700, color: C.gold, fontSize: 14 }}>{m.scoreA}–{m.scoreB}</span> : <span style={{ ...S.tag(m.matchStatus === "conflicto" ? C.red : m.matchStatus === "parcial" ? C.orange : C.muted), fontSize: 8 }}>{m.matchStatus || "pdte"}</span>}</div>
+                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", minWidth: 0 }}><span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.teamB}</span><TeamLogo name={m.teamB} logoUrl={logoMap[m.teamB]} size={20} /></div>
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>

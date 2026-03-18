@@ -3,19 +3,46 @@ import { db } from "../firebase";
 import { collection, addDoc, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "firebase/firestore";
 import { C, S } from "../shared.jsx";
 
-// Default normativa shown when no custom rules exist yet
 const DEFAULT_NORMATIVA = [
-  { titulo: "1. Participación", texto: "Todos los equipos deben estar registrados y confirmados antes del inicio del torneo." },
-  { titulo: "2. Formato", texto: "Los partidos se juegan en FIFA Clubes Pro con la configuración oficial establecida por la organización." },
-  { titulo: "3. Puntualidad", texto: "10 minutos de margen desde la hora acordada. El incumplimiento puede suponer derrota por incomparecencia (0-3)." },
-  { titulo: "4. Conducta", texto: "Se espera comportamiento deportivo y respetuoso en todo momento. Las infracciones pueden suponer expulsión del torneo." },
-  { titulo: "5. Resultados", texto: "Los resultados deben ser reportados por ambos equipos. En caso de discrepancia, la organización tomará la decisión final." },
-  { titulo: "6. Fase de grupos", texto: "Clasificación por puntos (3V/1E/0D), diferencia de goles y goles a favor. En caso de igualdad se aplica el resultado directo." },
-  { titulo: "7. Eliminatoria", texto: "No se permiten empates en rondas eliminatorias. En caso de igualdad al final del tiempo reglamentario se jugarán penaltis." },
-  { titulo: "8. Modificaciones", texto: "La organización se reserva el derecho de modificar el formato o las normas en casos excepcionales, comunicándolo con antelación." },
+  {
+    titulo: "1. Registro y participación",
+    texto: "Todos los equipos deben estar registrados en la plataforma y tener la inscripción aprobada por la organización antes del inicio del torneo. No se admitirán equipos una vez iniciada la competición.",
+  },
+  {
+    titulo: "2. Puntualidad",
+    texto: "Se recomienda respetar la hora acordada. Los 10 minutos de margen son orientativos — si un equipo no puede conectarse a tiempo, debe comunicárselo al rival y a la organización lo antes posible. En caso de que el retraso sea excesivo y no haya comunicación, la organización valorará la situación y tomará la decisión que considere oportuna.",
+  },
+  {
+    titulo: "3. Comunicación previa",
+    texto: "Ambos equipos tienen la obligación de contactar con el rival antes del partido para acordar la hora. Los datos de contacto están disponibles en la plataforma. La falta de comunicación no exime de la responsabilidad de jugar.",
+  },
+  {
+    titulo: "4. Reporte de resultados",
+    texto: "Al finalizar el partido, ambos equipos deben reportar el resultado en la plataforma. Si ambos reportes coinciden, el resultado queda validado automáticamente. Si hay discrepancia, la organización tomará la decisión final basándose en las pruebas aportadas.",
+  },
+  {
+    titulo: "5. Pruebas y evidencias",
+    texto: "En caso de conflicto se recomienda guardar capturas de pantalla del resultado final. La organización podrá solicitar estas pruebas para resolver disputas. Sin evidencias, prevalece el criterio de la organización.",
+  },
+  {
+    titulo: "6. Clasificación en fase de grupos",
+    texto: "El orden se determina por puntos (3 victoria, 1 empate, 0 derrota), diferencia de goles, goles a favor y resultado directo entre los equipos empatados, en ese orden.",
+  },
+  {
+    titulo: "7. Fase eliminatoria",
+    texto: "No se permiten empates. En caso de igualdad al final del tiempo reglamentario se disputarán penaltis. El ganador avanza a la siguiente ronda.",
+  },
+  {
+    titulo: "8. Conducta deportiva",
+    texto: "Se exige un comportamiento respetuoso dentro y fuera del campo. Insultos, amenazas o actitudes antideportivas pueden suponer penalizaciones o expulsión del torneo a criterio de la organización.",
+  },
+  {
+    titulo: "9. Modificaciones",
+    texto: "La organización se reserva el derecho de modificar el reglamento en casos excepcionales, comunicándolo a los participantes con la mayor antelación posible.",
+  },
 ];
 
-// ── Read-only view (used by users and public) ─────────────────────
+// ── Read-only view ────────────────────────────────────────────────
 export function NormativaView() {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,8 +50,7 @@ export function NormativaView() {
   useEffect(() => {
     const q = query(collection(db, "normativa"), orderBy("order", "asc"));
     return onSnapshot(q, snap => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setRules(data);
+      setRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
     });
   }, []);
@@ -38,12 +64,12 @@ export function NormativaView() {
       {display.map((n, i) => (
         <div key={n.id || i} style={S.card}>
           <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14, color: C.gold }}>{n.titulo}</p>
-          <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.65 }}>{n.texto}</p>
+          <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.7 }}>{n.texto}</p>
         </div>
       ))}
       {rules.length === 0 && (
         <p style={{ fontSize: 11, color: C.faint, textAlign: "center", marginTop: 8 }}>
-          Normativa por defecto · El admin puede personalizarla
+          Normativa por defecto · El admin puede personalizarla en su panel
         </p>
       )}
     </div>
@@ -81,7 +107,10 @@ export function NormativaEditor() {
         showNotif("Actualizado ✓");
       } else {
         const maxOrder = rules.length > 0 ? Math.max(...rules.map(r => r.order || 0)) : 0;
-        await addDoc(collection(db, "normativa"), { titulo: form.titulo.trim(), texto: form.texto.trim(), order: maxOrder + 1, createdAt: new Date().toISOString() });
+        await addDoc(collection(db, "normativa"), {
+          titulo: form.titulo.trim(), texto: form.texto.trim(),
+          order: maxOrder + 1, createdAt: new Date().toISOString(),
+        });
         showNotif("Añadido ✓");
       }
       setForm({ titulo: "", texto: "" });
@@ -113,17 +142,14 @@ export function NormativaEditor() {
     window.scrollTo(0, 0);
   }
 
-  function cancelEdit() {
-    setEditingId(null);
-    setForm({ titulo: "", texto: "" });
-  }
-
-  // Load default normativa as starting point
   async function loadDefaults() {
-    if (!window.confirm("¿Cargar la normativa por defecto? Esto añadirá las normas estándar.")) return;
+    if (!window.confirm("¿Cargar la normativa por defecto? Se añadirán las 9 normas estándar.")) return;
     setSaving(true);
     for (let i = 0; i < DEFAULT_NORMATIVA.length; i++) {
-      await addDoc(collection(db, "normativa"), { ...DEFAULT_NORMATIVA[i], order: i + 1, createdAt: new Date().toISOString() });
+      await addDoc(collection(db, "normativa"), {
+        ...DEFAULT_NORMATIVA[i], order: (rules.length + i + 1),
+        createdAt: new Date().toISOString(),
+      });
     }
     setSaving(false);
     showNotif("Normativa por defecto cargada ✓");
@@ -151,40 +177,48 @@ export function NormativaEditor() {
             <button style={{ ...S.btn(), opacity: saving ? 0.6 : 1 }} onClick={saveRule} disabled={saving}>
               {saving ? "Guardando..." : editingId ? "Actualizar →" : "Añadir norma →"}
             </button>
-            {editingId && <button style={S.btnSm} onClick={cancelEdit}>Cancelar</button>}
+            {editingId && <button style={S.btnSm} onClick={() => { setEditingId(null); setForm({ titulo: "", texto: "" }); }}>Cancelar</button>}
           </div>
         </div>
       </div>
 
-      {/* Current rules */}
+      {/* Rules list */}
       {rules.length === 0 ? (
         <div style={{ ...S.card, textAlign: "center", padding: 32 }}>
-          <p style={{ color: C.muted, marginBottom: 16 }}>No hay normas personalizadas. Se muestra la normativa por defecto.</p>
+          <p style={{ color: C.muted, marginBottom: 16 }}>No hay normas personalizadas todavía.</p>
+          <p style={{ color: C.faint, fontSize: 12, marginBottom: 20 }}>Se muestra la normativa por defecto a los usuarios.</p>
           <button style={{ ...S.btnInline(C.blue) }} onClick={loadDefaults} disabled={saving}>
-            Cargar normativa por defecto
+            Cargar normativa por defecto (9 normas)
           </button>
         </div>
       ) : (
-        rules.map((rule, idx) => (
-          <div key={rule.id} style={{ ...S.card, marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: "0 0 5px", fontWeight: 700, fontSize: 14, color: C.gold }}>{rule.titulo}</p>
-                <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.6 }}>{rule.texto}</p>
-              </div>
-              <div style={{ display: "flex", gap: 6, flexShrink: 0, flexDirection: "column" }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button style={{ ...S.btnSm, padding: "6px 10px" }} onClick={() => moveRule(rule.id, "up")} disabled={idx === 0}>↑</button>
-                  <button style={{ ...S.btnSm, padding: "6px 10px" }} onClick={() => moveRule(rule.id, "down")} disabled={idx === rules.length - 1}>↓</button>
+        <>
+          {rules.map((rule, idx) => (
+            <div key={rule.id} style={{ ...S.card, marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: "0 0 5px", fontWeight: 700, fontSize: 14, color: C.gold }}>{rule.titulo}</p>
+                  <p style={{ margin: 0, fontSize: 13, color: "#8a9ab4", lineHeight: 1.6 }}>{rule.texto}</p>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button style={{ ...S.btnSm, flex: 1 }} onClick={() => startEdit(rule)}>Editar</button>
-                  <button style={{ ...S.btnDanger, flex: 1 }} onClick={() => deleteRule(rule.id)}>Borrar</button>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0, flexDirection: "column", alignItems: "flex-end" }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={{ ...S.btnSm, padding: "6px 10px" }} onClick={() => moveRule(rule.id, "up")} disabled={idx === 0}>↑</button>
+                    <button style={{ ...S.btnSm, padding: "6px 10px" }} onClick={() => moveRule(rule.id, "down")} disabled={idx === rules.length - 1}>↓</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={{ ...S.btnSm }} onClick={() => startEdit(rule)}>Editar</button>
+                    <button style={S.btnDanger} onClick={() => deleteRule(rule.id)}>Borrar</button>
+                  </div>
                 </div>
               </div>
             </div>
+          ))}
+          <div style={{ textAlign: "center", marginTop: 16 }}>
+            <button style={{ ...S.btnSm, fontSize: 10 }} onClick={loadDefaults} disabled={saving}>
+              + Añadir normativa por defecto
+            </button>
           </div>
-        ))
+        </>
       )}
     </div>
   );
