@@ -6,6 +6,7 @@ import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, i
 import MatchesPanel from "./MatchesPanel.jsx";
 import RankingPanel from "./RankingPanel.jsx";
 import TeamManager from "./TeamManager.jsx";
+import PlayerProfile from "./PlayerProfile.jsx";
 import { NormativaView } from "./NormativaPanel.jsx";
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
   { id: "partidos",  icon: "⚽", label: "Partidos" },
   { id: "ranking",   icon: "📊", label: "Ranking" },
   { id: "equipo",    icon: "🛡",  label: "Mi equipo" },
+  { id: "jugador",   icon: "👤", label: "Jugador" },
   { id: "normativa", icon: "📋", label: "Normas" },
 ];
 
@@ -22,19 +24,11 @@ function formatDate(iso) {
   catch { return iso; }
 }
 
-// Compute a team's stats + position in a tournament
 function getTournamentSummary(tournament, teamName) {
   if (!tournament) return null;
-
   const ttype = TOURNAMENT_TYPES[tournament.tournamentType] || TOURNAMENT_TYPES.rapido;
   let pj = 0, pg = 0, pe = 0, pp = 0, gf = 0, gc = 0;
-
-  // Collect all matches involving this team
-  const allMatches = [
-    ...(tournament.groups || []).flatMap(g => g.matches || []),
-    ...(tournament.eliminationRounds || []).flatMap(r => r.matches || []),
-  ];
-
+  const allMatches = [...(tournament.groups || []).flatMap(g => g.matches || []), ...(tournament.eliminationRounds || []).flatMap(r => r.matches || [])];
   allMatches.forEach(m => {
     if (m.matchStatus !== "validado") return;
     if (m.teamA === teamName || m.teamB === teamName) {
@@ -47,44 +41,27 @@ function getTournamentSummary(tournament, teamName) {
       else pp++;
     }
   });
-
-  // Find position in group (if applicable)
   let groupPos = null, groupName = null, groupTotal = null;
   if (tournament.groups) {
     for (const g of tournament.groups) {
       const idx = g.standings.findIndex(s => s.name === teamName);
-      if (idx !== -1) {
-        groupPos = idx + 1;
-        groupName = g.name;
-        groupTotal = g.standings.length;
-        break;
-      }
+      if (idx !== -1) { groupPos = idx + 1; groupName = g.name; groupTotal = g.standings.length; break; }
     }
   }
-
-  // Find elimination phase result
   let elimResult = null;
   if (tournament.eliminationRounds?.length > 0) {
-    // Find furthest round reached
     for (let ri = tournament.eliminationRounds.length - 1; ri >= 0; ri--) {
       const round = tournament.eliminationRounds[ri];
       const match = round.matches.find(m => m.teamA === teamName || m.teamB === teamName);
       if (match) {
         const roundName = getRoundName(tournament.eliminationRounds.length, ri);
-        if (match.winner === teamName) {
-          elimResult = ri === tournament.eliminationRounds.length - 1 ? "🏆 Campeón" : `✓ ${roundName}`;
-        } else if (match.winner && match.winner !== teamName) {
-          elimResult = `Eliminado en ${roundName}`;
-        }
+        if (match.winner === teamName) elimResult = ri === tournament.eliminationRounds.length - 1 ? "🏆 Campeón" : `✓ ${roundName}`;
+        else if (match.winner && match.winner !== teamName) elimResult = `Eliminado en ${roundName}`;
         break;
       }
     }
   }
-
-  // Champion check
-  const isChampion = tournament.winner === teamName;
-
-  return { pj, pg, pe, pp, gf, gc, gd: gf - gc, groupPos, groupName, groupTotal, elimResult, isChampion, ttype };
+  return { pj, pg, pe, pp, gf, gc, gd: gf - gc, groupPos, groupName, groupTotal, elimResult, isChampion: tournament.winner === teamName, ttype };
 }
 
 export default function UserDashboard({ onLogout }) {
@@ -149,14 +126,13 @@ export default function UserDashboard({ onLogout }) {
       await addDoc(collection(db, "inscriptions"), {
         tournamentId: selectedTournament.id, tournamentName: selectedTournament.name,
         userId: user.uid, userName: profile?.name || user.email,
-        teamId: myTeam.id, teamName: myTeam.name,
-        logoUrl: myTeam.logoUrl || null,
+        teamId: myTeam.id, teamName: myTeam.name, logoUrl: myTeam.logoUrl || null,
         managerId: inscForm.managerId.trim(), phone: inscForm.phone.trim(),
         twitter: inscForm.twitter.trim(), status: "pendiente",
         createdAt: new Date().toISOString(),
       });
       setShowModal(false); showNotif("Solicitud enviada ✓");
-    } catch (e) { showNotif("Error al enviar."); }
+    } catch { showNotif("Error al enviar."); }
     setUploading(false);
   }
 
@@ -178,7 +154,6 @@ export default function UserDashboard({ onLogout }) {
     <div style={S.wrap}>
       {notif && <div style={{ position: "fixed", top: 16, left: 16, right: 16, background: C.gold, color: "#07090f", padding: "13px 16px", zIndex: 1000, fontSize: 13, fontFamily: "'Georgia',serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", borderRadius: 10, textAlign: "center", fontWeight: 600 }}>{notif}</div>}
 
-      {/* Inscription modal */}
       {showModal && selectedTournament && (
         <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 300, overflowY: "auto", display: "flex", flexDirection: "column" }}>
           <div style={{ ...S.topBar, position: "relative", flexShrink: 0 }}>
@@ -196,13 +171,9 @@ export default function UserDashboard({ onLogout }) {
               </div>
             ) : (
               <>
-                {/* WhatsApp shown immediately */}
                 {selectedTournament.whatsappLink && (
-                  <a href={selectedTournament.whatsappLink} target="_blank" rel="noopener noreferrer"
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, textDecoration: "none", color: C.text, marginBottom: 20 }}>
-                    <span style={{ fontSize: 20 }}>💬</span>
-                    <div><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600, color: "#25d366" }}>Grupo de WhatsApp</p><p style={{ margin: 0, fontSize: 11, color: C.muted }}>Únete al grupo del torneo</p></div>
-                    <span style={{ marginLeft: "auto", color: C.faint }}>→</span>
+                  <a href={selectedTournament.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "rgba(37,211,102,0.08)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, textDecoration: "none", color: C.text, marginBottom: 20 }}>
+                    <span style={{ fontSize: 20 }}>💬</span><div><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600, color: "#25d366" }}>Grupo de WhatsApp</p></div><span style={{ marginLeft: "auto", color: C.faint }}>→</span>
                   </a>
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: 10, marginBottom: 20 }}>
@@ -211,8 +182,8 @@ export default function UserDashboard({ onLogout }) {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <div><label style={S.label}>ID Manager *</label><input style={S.input} placeholder="Tu ID de FIFA" value={inscForm.managerId} onChange={e => setInscForm(p => ({ ...p, managerId: e.target.value }))} /></div>
-                  <div><label style={S.label}>Teléfono de contacto *</label><input style={S.input} type="tel" placeholder="+34 600 000 000" value={inscForm.phone} onChange={e => setInscForm(p => ({ ...p, phone: e.target.value }))} /></div>
-                  <div><label style={S.label}>Cuenta de X (opcional)</label><input style={S.input} placeholder="@tunombre" value={inscForm.twitter} onChange={e => setInscForm(p => ({ ...p, twitter: e.target.value }))} /></div>
+                  <div><label style={S.label}>Teléfono *</label><input style={S.input} type="tel" placeholder="+34 600 000 000" value={inscForm.phone} onChange={e => setInscForm(p => ({ ...p, phone: e.target.value }))} /></div>
+                  <div><label style={S.label}>X (opcional)</label><input style={S.input} placeholder="@tunombre" value={inscForm.twitter} onChange={e => setInscForm(p => ({ ...p, twitter: e.target.value }))} /></div>
                   <button style={{ ...S.btn(C.gold), opacity: uploading ? 0.6 : 1 }} onClick={inscribirse} disabled={uploading}>{uploading ? "Enviando..." : "Enviar solicitud →"}</button>
                 </div>
               </>
@@ -237,7 +208,6 @@ export default function UserDashboard({ onLogout }) {
 
       <main style={S.main}>
 
-        {/* ── TORNEOS ── */}
         {tab === "torneos" && (
           <>
             <p style={S.pageTitle}>Torneos</p>
@@ -245,7 +215,7 @@ export default function UserDashboard({ onLogout }) {
             {!myTeam && (
               <div style={{ ...S.card, background: "rgba(232,184,75,0.06)", border: "1px solid rgba(232,184,75,0.2)", marginBottom: 16 }}>
                 <p style={{ margin: "0 0 8px", fontSize: 13, color: C.gold, fontWeight: 700 }}>Aún no tienes equipo</p>
-                <p style={{ margin: "0 0 12px", fontSize: 12, color: C.muted }}>Crea tu equipo para inscribirte en torneos y aparecer en el ranking ELO.</p>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: C.muted }}>Crea tu equipo para inscribirte en torneos.</p>
                 <button style={{ ...S.btnInline(C.gold) }} onClick={() => setTab("equipo")}>Crear mi equipo →</button>
               </div>
             )}
@@ -259,19 +229,12 @@ export default function UserDashboard({ onLogout }) {
                 const hasElim   = t.eliminationRounds?.length > 0;
                 const ttype = TOURNAMENT_TYPES[t.tournamentType] || TOURNAMENT_TYPES.rapido;
 
-                // Rival phones — only when En curso and approved
                 const myRivals = [];
                 if (t.status === "En curso" && myInsc?.status === "aprobada") {
                   const allMatches = [...(t.groups || []).flatMap(g => g.matches || []), ...(t.eliminationRounds || []).flatMap(r => r.matches || [])];
                   allMatches.forEach(m => {
-                    if (myTeamNames.has(m.teamA) && m.teamB !== "BYE") {
-                      const phone = getRivalPhone(t.id, m.teamB);
-                      if (phone && !myRivals.find(r => r.name === m.teamB)) myRivals.push({ name: m.teamB, phone });
-                    }
-                    if (myTeamNames.has(m.teamB) && m.teamA !== "BYE") {
-                      const phone = getRivalPhone(t.id, m.teamA);
-                      if (phone && !myRivals.find(r => r.name === m.teamA)) myRivals.push({ name: m.teamA, phone });
-                    }
+                    if (myTeamNames.has(m.teamA) && m.teamB !== "BYE") { const phone = getRivalPhone(t.id, m.teamB); if (phone && !myRivals.find(r => r.name === m.teamB)) myRivals.push({ name: m.teamB, phone }); }
+                    if (myTeamNames.has(m.teamB) && m.teamA !== "BYE") { const phone = getRivalPhone(t.id, m.teamA); if (phone && !myRivals.find(r => r.name === m.teamA)) myRivals.push({ name: m.teamA, phone }); }
                   });
                 }
 
@@ -290,26 +253,19 @@ export default function UserDashboard({ onLogout }) {
                       </div>
                     </div>
 
-                    {/* WhatsApp — visible as soon as inscribed */}
                     {isInscribed && t.whatsappLink && (
-                      <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer"
-                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.07)", border: "1px solid rgba(37,211,102,0.18)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 10 }}>
-                        <span style={{ fontSize: 16 }}>💬</span><span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp</span><span style={{ marginLeft: "auto", color: C.faint, fontSize: 14 }}>→</span>
+                      <a href={t.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(37,211,102,0.07)", border: "1px solid rgba(37,211,102,0.18)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 10 }}>
+                        <span style={{ fontSize: 16 }}>💬</span><span style={{ fontSize: 12, color: "#25d366", fontWeight: 600 }}>Grupo de WhatsApp</span><span style={{ marginLeft: "auto", color: C.faint }}>→</span>
                       </a>
                     )}
 
-                    {/* Rival phones — En curso only */}
                     {myRivals.length > 0 && (
                       <div style={{ marginBottom: 10 }}>
                         <p style={{ ...S.label, marginBottom: 8 }}>Contacto de rivales</p>
                         {myRivals.map(rival => (
-                          <a key={rival.name} href={`https://wa.me/${rival.phone.replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer"
-                            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 6 }}>
+                          <a key={rival.name} href={`https://wa.me/${rival.phone.replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(79,142,247,0.06)", border: "1px solid rgba(79,142,247,0.15)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: 6 }}>
                             <TeamLogo name={rival.name} logoUrl={logoMap[rival.name]} size={28} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600 }}>{rival.name}</p>
-                              <p style={{ margin: 0, fontSize: 11, color: C.muted }}>📞 {rival.phone}</p>
-                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600 }}>{rival.name}</p><p style={{ margin: 0, fontSize: 11, color: C.muted }}>📞 {rival.phone}</p></div>
                             <span style={{ color: "#25d366", fontSize: 18 }}>💬</span>
                           </a>
                         ))}
@@ -366,56 +322,41 @@ export default function UserDashboard({ onLogout }) {
 
         {tab === "ranking" && (<><p style={S.pageTitle}>Ranking ELO</p><p style={S.pageSubtitle}>Clasificación histórica de equipos</p><RankingPanel myTeamId={profile?.teamId} /></>)}
 
-        {/* ── MI EQUIPO ── */}
         {tab === "equipo" && (
           <>
             <p style={S.pageTitle}>Mi equipo</p>
             <p style={S.pageSubtitle}>Gestiona tu equipo y sus gestores</p>
             <TeamManager />
-
             {myInscriptions.length > 0 && (
               <>
                 <p style={{ ...S.pageTitle, fontSize: 18, marginTop: 28, marginBottom: 4 }}>Historial de torneos</p>
                 <p style={{ ...S.pageSubtitle, marginBottom: 16 }}>{myInscriptions.length} participaciones</p>
-
                 {myInscriptions.map(i => {
                   const tournament = tournaments.find(t => t.id === i.tournamentId);
                   const summary = tournament ? getTournamentSummary(tournament, i.teamName) : null;
                   const ttype = summary?.ttype || TOURNAMENT_TYPES.rapido;
                   const hasStarted = tournament && (tournament.groups?.length > 0 || tournament.eliminationRounds?.length > 0);
-
                   return (
                     <div key={i.id} style={{ ...S.card, marginBottom: 10 }}>
-                      {/* Tournament header */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: summary?.pj > 0 ? 12 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: summary?.pj > 0 ? 12 : 6 }}>
                         <div style={{ width: 36, height: 36, background: `${ttype.color}14`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{ttype.icon}</div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.tournamentName}</p>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                             {tournament?.startDate && <span style={{ fontSize: 11, color: C.blue }}>📅 {new Date(tournament.startDate).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })}</span>}
                             <span style={S.tag(tournament ? (statusColor[tournament.status] || "#6b7a90") : C.muted)}>{tournament?.status || "—"}</span>
-                            <span style={S.tag(i.status === "aprobada" ? C.green : i.status === "rechazada" ? C.red : C.gold)}>{i.status === "aprobada" ? "Aprobado" : i.status === "rechazada" ? "Rechazado" : "Pendiente"}</span>
                           </div>
                         </div>
-                        {/* Champion badge */}
                         {summary?.isChampion && <span style={{ fontSize: 22 }}>🏆</span>}
                       </div>
-
-                      {/* WhatsApp if inscribed */}
                       {tournament?.whatsappLink && i.status !== "rechazada" && (
-                        <a href={tournament.whatsappLink} target="_blank" rel="noopener noreferrer"
-                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.15)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: summary?.pj > 0 ? 12 : 0 }}>
-                          <span style={{ fontSize: 14 }}>💬</span>
-                          <span style={{ fontSize: 12, color: "#25d366" }}>Grupo de WhatsApp</span>
-                          <span style={{ marginLeft: "auto", color: C.faint, fontSize: 12 }}>→</span>
+                        <a href={tournament.whatsappLink} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.15)", borderRadius: 8, textDecoration: "none", color: C.text, marginBottom: summary?.pj > 0 ? 12 : 0 }}>
+                          <span style={{ fontSize: 14 }}>💬</span><span style={{ fontSize: 12, color: "#25d366" }}>Grupo de WhatsApp</span><span style={{ marginLeft: "auto", color: C.faint, fontSize: 12 }}>→</span>
                         </a>
                       )}
-
-                      {/* Summary — only if played at least 1 match */}
                       {summary && summary.pj > 0 && (
                         <div>
-                          {/* Stats row */}
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 10 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 8 }}>
                             {[["PJ", summary.pj, C.text], ["V", summary.pg, C.green], ["E", summary.pe, C.gold], ["D", summary.pp, C.red]].map(([l, v, c]) => (
                               <div key={l} style={{ textAlign: "center", padding: "8px 4px", background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
                                 <p style={{ margin: "0 0 1px", fontSize: 16, fontWeight: 700, color: c }}>{v}</p>
@@ -423,9 +364,7 @@ export default function UserDashboard({ onLogout }) {
                               </div>
                             ))}
                           </div>
-
-                          {/* GF / GC / GD */}
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
                             {[["GF", summary.gf, C.text], ["GC", summary.gc, C.text], ["DG", summary.gd > 0 ? `+${summary.gd}` : summary.gd, summary.gd >= 0 ? C.green : C.red]].map(([l, v, c]) => (
                               <div key={l} style={{ textAlign: "center", padding: "6px 4px", background: "rgba(255,255,255,0.02)", borderRadius: 6 }}>
                                 <p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 600, color: c }}>{v}</p>
@@ -433,34 +372,26 @@ export default function UserDashboard({ onLogout }) {
                               </div>
                             ))}
                           </div>
-
-                          {/* Position / elim result */}
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {summary.groupPos && (
-                              <div style={{ padding: "6px 12px", background: "rgba(79,142,247,0.08)", border: "1px solid rgba(79,142,247,0.2)", borderRadius: 8 }}>
-                                <span style={{ fontSize: 12, color: C.blue }}>
-                                  {summary.groupPos === 1 ? "🥇" : summary.groupPos === 2 ? "🥈" : summary.groupPos === 3 ? "🥉" : `${summary.groupPos}º`} Grupo {summary.groupName} · {summary.groupPos}º/{summary.groupTotal}
-                                </span>
-                              </div>
-                            )}
-                            {summary.elimResult && (
-                              <div style={{ padding: "6px 12px", background: summary.isChampion ? "rgba(232,184,75,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${summary.isChampion ? "rgba(232,184,75,0.3)" : "rgba(255,255,255,0.08)"}`, borderRadius: 8 }}>
-                                <span style={{ fontSize: 12, color: summary.isChampion ? C.gold : C.text }}>{summary.elimResult}</span>
-                              </div>
-                            )}
+                            {summary.groupPos && <div style={{ padding: "6px 12px", background: "rgba(79,142,247,0.08)", border: "1px solid rgba(79,142,247,0.2)", borderRadius: 8 }}><span style={{ fontSize: 12, color: C.blue }}>{summary.groupPos === 1 ? "🥇" : summary.groupPos === 2 ? "🥈" : summary.groupPos === 3 ? "🥉" : `${summary.groupPos}º`} Grupo {summary.groupName} · {summary.groupPos}º/{summary.groupTotal}</span></div>}
+                            {summary.elimResult && <div style={{ padding: "6px 12px", background: summary.isChampion ? "rgba(232,184,75,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${summary.isChampion ? "rgba(232,184,75,0.3)" : "rgba(255,255,255,0.08)"}`, borderRadius: 8 }}><span style={{ fontSize: 12, color: summary.isChampion ? C.gold : C.text }}>{summary.elimResult}</span></div>}
                           </div>
                         </div>
                       )}
-
-                      {/* Not started yet */}
-                      {i.status === "aprobada" && !hasStarted && (
-                        <p style={{ margin: "8px 0 0", fontSize: 12, color: C.faint }}>El torneo aún no ha comenzado</p>
-                      )}
+                      {i.status === "aprobada" && !hasStarted && <p style={{ margin: "8px 0 0", fontSize: 12, color: C.faint }}>El torneo aún no ha comenzado</p>}
                     </div>
                   );
                 })}
               </>
             )}
+          </>
+        )}
+
+        {tab === "jugador" && (
+          <>
+            <p style={S.pageTitle}>Mi perfil de jugador</p>
+            <p style={S.pageSubtitle}>Stats individuales y equipo</p>
+            <PlayerProfile logoMap={logoMap} />
           </>
         )}
 
