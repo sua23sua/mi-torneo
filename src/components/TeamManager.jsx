@@ -5,17 +5,17 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "../AuthContext";
 import { C, S, TeamLogo, EloBar, eloLabel, eloTierIcon, ELO_DEFAULT } from "../shared.jsx";
 
-const PLATFORM_LABELS = {
-  "common-gen5": "PS5 / Xbox Series",
-  "common-gen4": "PS4 / Xbox One",
-  "pc": "PC",
-};
+const PLATFORMS = [
+  { value: "common-gen5", label: "PS5 / Xbox Series X|S" },
+  { value: "common-gen4", label: "PS4 / Xbox One" },
+  { value: "pc",          label: "PC (Origin)" },
+];
 
 export default function TeamManager() {
   const { user, profile } = useAuth();
   const [myTeam, setMyTeam] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("equipo"); // equipo | jugadores
+  const [activeTab, setActiveTab] = useState("equipo");
   const [editing, setEditing] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [logoFile, setLogoFile] = useState(null);
@@ -28,11 +28,12 @@ export default function TeamManager() {
   const [teamPlayers, setTeamPlayers] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
 
-  // EA linking
-  const [eaSearch, setEaSearch] = useState("");
-  const [eaResults, setEaResults] = useState([]);
-  const [eaSearching, setEaSearching] = useState(false);
-  const [showEaSearch, setShowEaSearch] = useState(false);
+  // EA linking — manual ID
+  const [showEaForm, setShowEaForm] = useState(false);
+  const [eaClubId, setEaClubId] = useState("");
+  const [eaClubName, setEaClubName] = useState("");
+  const [eaPlatform, setEaPlatform] = useState("common-gen5");
+  const [savingEa, setSavingEa] = useState(false);
 
   function showNotif(msg, color = C.green) {
     setNotif({ msg, color });
@@ -58,13 +59,10 @@ export default function TeamManager() {
     return unsub;
   }, [profile?.teamId]);
 
-  // Load players and pending requests when team is loaded
   useEffect(() => {
     if (!myTeam?.id) return;
-    // Active players
     const q1 = query(collection(db, "players"), where("teamId", "==", myTeam.id));
     const u1 = onSnapshot(q1, snap => setTeamPlayers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    // Pending requests
     const q2 = query(collection(db, "playerRequests"), where("teamId", "==", myTeam.id), where("status", "==", "pendiente"));
     const u2 = onSnapshot(q2, snap => setPendingRequests(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     return () => { u1(); u2(); };
@@ -90,10 +88,7 @@ export default function TeamManager() {
       });
       await updateDoc(doc(db, "users", user.uid), { teamId: teamDoc.id });
       showNotif("Equipo creado ✓");
-    } catch (e) {
-      showNotif("Error: " + e.message, C.red);
-      setSaving(false);
-    }
+    } catch (e) { showNotif("Error: " + e.message, C.red); setSaving(false); }
   }
 
   useEffect(() => { if (myTeam) setSaving(false); }, [myTeam]);
@@ -115,17 +110,33 @@ export default function TeamManager() {
     setSaving(false);
   }
 
+  async function saveEaLink() {
+    if (!eaClubId.trim()) return showNotif("Introduce el Club ID", C.red);
+    if (isNaN(parseInt(eaClubId))) return showNotif("El Club ID debe ser un número", C.red);
+    setSavingEa(true);
+    try {
+      await updateDoc(doc(db, "teams", myTeam.id), {
+        eaClubId: parseInt(eaClubId),
+        eaPlatform: eaPlatform,
+        eaClubName: eaClubName.trim() || null,
+      });
+      setShowEaForm(false);
+      setEaClubId(""); setEaClubName(""); setEaPlatform("common-gen5");
+      showNotif("Club de EA FC vinculado ✓");
+    } catch (e) { showNotif("Error: " + e.message, C.red); }
+    setSavingEa(false);
+  }
+
+  async function unlinkEa() {
+    if (!window.confirm("¿Desvincular el club de EA FC?")) return;
+    await updateDoc(doc(db, "teams", myTeam.id), { eaClubId: null, eaPlatform: null, eaClubName: null });
+    showNotif("Desvinculado de EA FC");
+  }
+
   async function approvePlayer(request) {
     try {
-      // Update player doc
-      await updateDoc(doc(db, "players", request.playerId), {
-        teamId: myTeam.id, teamName: myTeam.name, status: "activo",
-      });
-      // Add player to team's players array
-      await updateDoc(doc(db, "teams", myTeam.id), {
-        players: [...(myTeam.players || []), request.playerId],
-      });
-      // Update request status
+      await updateDoc(doc(db, "players", request.playerId), { teamId: myTeam.id, teamName: myTeam.name, status: "activo" });
+      await updateDoc(doc(db, "teams", myTeam.id), { players: [...(myTeam.players || []), request.playerId] });
       await updateDoc(doc(db, "playerRequests", request.id), { status: "aprobada" });
       showNotif(`${request.userName} aprobado ✓`);
     } catch (e) { showNotif("Error: " + e.message, C.red); }
@@ -140,26 +151,7 @@ export default function TeamManager() {
     if (!window.confirm(`¿Eliminar a ${player.userName} del equipo?`)) return;
     await updateDoc(doc(db, "players", player.id), { teamId: null, teamName: null, status: "sin_equipo" });
     await updateDoc(doc(db, "teams", myTeam.id), { players: (myTeam.players || []).filter(id => id !== player.id) });
-    showNotif("Jugador eliminado del equipo");
-  }
-
-  async function searchEaClub() {
-    if (!eaSearch.trim()) return;
-    setEaSearching(true); setEaResults([]);
-    try {
-      const res = await fetch(`/api/proclubs?action=search&clubName=${encodeURIComponent(eaSearch.trim())}`);
-      const data = await res.json();
-      setEaResults(Array.isArray(data) ? data : []);
-      if (!data?.length) showNotif("No se encontraron clubs", C.orange);
-    } catch (e) { showNotif("Error al buscar", C.red); }
-    setEaSearching(false);
-  }
-
-  async function linkEaClub(club) {
-    if (!myTeam) return;
-    await updateDoc(doc(db, "teams", myTeam.id), { eaClubId: club.clubId, eaPlatform: club.platform, eaClubName: club.name });
-    setEaResults([]); setEaSearch(""); setShowEaSearch(false);
-    showNotif(`Vinculado con "${club.name}" ✓`);
+    showNotif("Jugador eliminado");
   }
 
   async function addManager() {
@@ -213,11 +205,11 @@ export default function TeamManager() {
           <div>
             <label style={S.label}>Escudo</label>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              {logoPreview ? <img src={logoPreview} alt="preview" style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(232,184,75,0.4)" }} /> : <div style={{ width: 64, height: 64, borderRadius: "50%", border: "2px dashed rgba(232,184,75,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>🛡</div>}
+              {logoPreview ? <img src={logoPreview} alt="p" style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(232,184,75,0.4)" }} /> : <div style={{ width: 64, height: 64, borderRadius: "50%", border: "2px dashed rgba(232,184,75,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>🛡</div>}
               <label><input type="file" accept="image/*" onChange={handleLogoChange} style={{ display: "none" }} /><span style={{ ...S.btnSm, display: "inline-block" }}>Subir escudo</span></label>
             </div>
           </div>
-          <div><label style={S.label}>Nombre del equipo *</label><input style={S.input} value={teamName} onChange={e => setTeamName(e.target.value)} onKeyDown={e => e.key === "Enter" && !saving && createTeam()} /></div>
+          <div><label style={S.label}>Nombre del equipo *</label><input style={S.input} placeholder="Nombre único" value={teamName} onChange={e => setTeamName(e.target.value)} onKeyDown={e => e.key === "Enter" && !saving && createTeam()} /></div>
           <button style={{ ...S.btn(), opacity: saving ? 0.6 : 1 }} onClick={createTeam} disabled={saving}>{saving ? "Creando..." : "Crear equipo →"}</button>
         </div>
       </div>
@@ -294,43 +286,57 @@ export default function TeamManager() {
             {stats.titulos > 0 && <p style={{ margin: "12px 0 0", fontSize: 13, color: C.gold, textAlign: "center" }}>{"🏆".repeat(Math.min(stats.titulos, 5))} {stats.titulos} título{stats.titulos !== 1 ? "s" : ""}</p>}
           </div>
 
-          {/* EA Club link */}
+          {/* EA FC Club link — manual ID */}
           <div style={{ ...S.card, marginBottom: 16 }}>
             <p style={{ ...S.label, marginBottom: 12 }}>Vinculación con EA FC 26</p>
+
             {myTeam.eaClubId ? (
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "rgba(82,214,138,0.08)", border: "1px solid rgba(82,214,138,0.2)", borderRadius: 10, marginBottom: 12 }}>
                   <span style={{ fontSize: 24 }}>🎮</span>
                   <div style={{ flex: 1 }}>
-                    <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14, color: C.green }}>{myTeam.eaClubName}</p>
-                    <p style={{ margin: "0 0 1px", fontSize: 12, color: C.muted }}>ID: {myTeam.eaClubId}</p>
-                    <p style={{ margin: 0, fontSize: 11, color: C.faint }}>{PLATFORM_LABELS[myTeam.eaPlatform] || myTeam.eaPlatform}</p>
+                    {myTeam.eaClubName && <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14, color: C.green }}>{myTeam.eaClubName}</p>}
+                    <p style={{ margin: "0 0 1px", fontSize: 12, color: C.muted }}>Club ID: <strong style={{ color: C.text }}>{myTeam.eaClubId}</strong></p>
+                    <p style={{ margin: 0, fontSize: 11, color: C.faint }}>{PLATFORMS.find(p => p.value === myTeam.eaPlatform)?.label || myTeam.eaPlatform}</p>
                   </div>
-                  <span style={S.tag(C.green)}>Vinculado</span>
+                  <span style={S.tag(C.green)}>Vinculado ✓</span>
                 </div>
-                <button style={{ ...S.btnSm, color: C.red, borderColor: "rgba(247,111,111,0.3)" }} onClick={() => updateDoc(doc(db, "teams", myTeam.id), { eaClubId: null, eaPlatform: null, eaClubName: null })}>Desvincular</button>
+                <button style={{ ...S.btnSm, color: C.red, borderColor: "rgba(247,111,111,0.3)" }} onClick={unlinkEa}>Desvincular</button>
+              </div>
+            ) : !showEaForm ? (
+              <div>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: C.muted }}>
+                  Vincula tu club de EA FC 26 para detectar resultados automáticamente y actualizar las stats de jugadores al validar cada partido.
+                </p>
+                <div style={{ ...S.card, background: "rgba(79,142,247,0.04)", border: "1px solid rgba(79,142,247,0.12)", marginBottom: 12 }}>
+                  <p style={{ margin: "0 0 6px", fontSize: 12, color: C.blue, fontWeight: 700 }}>¿Cómo encontrar tu Club ID?</p>
+                  <p style={{ margin: "0 0 4px", fontSize: 12, color: C.muted }}>1. Ve a <strong style={{ color: C.text }}>proclubshead.com</strong> o <strong style={{ color: C.text }}>proclubs.io</strong></p>
+                  <p style={{ margin: "0 0 4px", fontSize: 12, color: C.muted }}>2. Busca tu club por nombre</p>
+                  <p style={{ margin: 0, fontSize: 12, color: C.muted }}>3. El ID aparece en la URL o en la ficha del club</p>
+                </div>
+                <button style={{ ...S.btnInline(C.blue) }} onClick={() => setShowEaForm(true)}>🎮 Vincular club de EA FC</button>
               </div>
             ) : (
-              <div>
-                <p style={{ margin: "0 0 12px", fontSize: 12, color: C.muted }}>Vincula tu club de EA FC 26 para detectar resultados automáticamente y actualizar stats de jugadores.</p>
-                {!showEaSearch ? (
-                  <button style={{ ...S.btnInline(C.blue) }} onClick={() => setShowEaSearch(true)}>🎮 Vincular club de EA FC</button>
-                ) : (
-                  <div>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                      <input style={{ ...S.input, flex: 1 }} placeholder="Nombre del club en EA FC..." value={eaSearch} onChange={e => setEaSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchEaClub()} />
-                      <button style={{ ...S.btnInline(C.blue), opacity: eaSearching ? 0.6 : 1 }} onClick={searchEaClub} disabled={eaSearching}>{eaSearching ? "..." : "Buscar"}</button>
-                    </div>
-                    {eaResults.map((club, i) => (
-                      <button key={i} onClick={() => linkEaClub(club)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, cursor: "pointer", fontFamily: "'Georgia',serif", textAlign: "left", marginBottom: 8 }}>
-                        <span style={{ fontSize: 22 }}>🎮</span>
-                        <div style={{ flex: 1 }}><p style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700 }}>{club.name}</p><p style={{ margin: 0, fontSize: 11, color: C.muted }}>{club.platformLabel} · ID: {club.clubId}</p></div>
-                        <span style={{ color: C.blue, fontSize: 12 }}>Vincular →</span>
-                      </button>
-                    ))}
-                    <button style={{ ...S.btnSm, marginTop: 8 }} onClick={() => { setShowEaSearch(false); setEaResults([]); setEaSearch(""); }}>Cancelar</button>
-                  </div>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={S.label}>Club ID de EA FC *</label>
+                  <input style={S.input} type="number" placeholder="Ej: 4023" value={eaClubId} onChange={e => setEaClubId(e.target.value)} />
+                  <p style={{ margin: "6px 0 0", fontSize: 11, color: C.faint }}>Número que aparece en la URL de tu club en proclubshead.com o proclubs.io</p>
+                </div>
+                <div>
+                  <label style={S.label}>Nombre del club en EA (opcional)</label>
+                  <input style={S.input} placeholder="Nombre tal como aparece en el juego" value={eaClubName} onChange={e => setEaClubName(e.target.value)} />
+                </div>
+                <div>
+                  <label style={S.label}>Plataforma</label>
+                  <select style={S.select} value={eaPlatform} onChange={e => setEaPlatform(e.target.value)}>
+                    {PLATFORMS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button style={{ ...S.btn(), flex: 1, opacity: savingEa ? 0.6 : 1 }} onClick={saveEaLink} disabled={savingEa}>{savingEa ? "Guardando..." : "Vincular →"}</button>
+                  <button style={S.btnSm} onClick={() => { setShowEaForm(false); setEaClubId(""); setEaClubName(""); }}>Cancelar</button>
+                </div>
               </div>
             )}
           </div>
@@ -351,6 +357,7 @@ export default function TeamManager() {
                 <input style={{ ...S.input, flex: 1 }} type="email" placeholder="email@ejemplo.com" value={managerEmail} onChange={e => setManagerEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && !addingManager && addManager()} />
                 <button style={{ ...S.btnInline(C.blue), opacity: addingManager ? 0.6 : 1 }} onClick={addManager} disabled={addingManager}>{addingManager ? "..." : "Añadir"}</button>
               </div>
+              <p style={{ margin: "6px 0 0", fontSize: 11, color: C.faint }}>Solo puede gestionar un equipo a la vez.</p>
             </div>
           </div>
         </div>
@@ -370,8 +377,8 @@ export default function TeamManager() {
                     <p style={{ margin: "0 0 1px", fontWeight: 700, fontSize: 14 }}>{req.userName}</p>
                     <p style={{ margin: 0, fontSize: 11, color: C.blue }}>🎮 PRO: {req.proName}</p>
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <button style={{ ...S.btnInline(C.green), padding: "7px 12px", fontSize: 10 }} onClick={() => approvePlayer(req)}>✓ Aprobar</button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={{ ...S.btnInline(C.green), padding: "7px 12px", fontSize: 10 }} onClick={() => approvePlayer(req)}>✓</button>
                     <button style={{ ...S.btnDanger, padding: "7px 10px", fontSize: 10 }} onClick={() => rejectPlayer(req)}>✕</button>
                   </div>
                 </div>
@@ -381,23 +388,24 @@ export default function TeamManager() {
 
           {/* Active players */}
           <div style={S.card}>
-            <p style={{ ...S.label, marginBottom: 12 }}>Jugadores del equipo ({teamPlayers.length})</p>
+            <p style={{ ...S.label, marginBottom: 12 }}>Plantilla ({teamPlayers.length} jugadores)</p>
             {teamPlayers.length === 0 ? (
-              <p style={{ color: C.faint, fontSize: 13, textAlign: "center", padding: "16px 0" }}>Aún no hay jugadores registrados en el equipo.</p>
+              <p style={{ color: C.faint, fontSize: 13, textAlign: "center", padding: "16px 0" }}>Aún no hay jugadores en el equipo.</p>
             ) : teamPlayers.map(player => {
               const g = player.stats?.global || { pj: 0, goles: 0, asistencias: 0, mvp: 0, media: 0, mediaCount: 0 };
+              const media = g.pj > 0 ? (g.media / (g.mediaCount || g.pj)).toFixed(1) : "—";
               return (
                 <div key={player.id} style={{ padding: "12px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                     <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(79,142,247,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>⚽</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: 1 }}>
                       <p style={{ margin: "0 0 1px", fontWeight: 700, fontSize: 14 }}>{player.userName}</p>
                       <p style={{ margin: 0, fontSize: 11, color: C.blue }}>🎮 {player.proName}</p>
                     </div>
                     <button style={{ ...S.btnDanger, fontSize: 9, padding: "5px 8px" }} onClick={() => removePlayer(player)}>Expulsar</button>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 4 }}>
-                    {[["PJ", g.pj, C.text], ["⚽", g.goles, C.green], ["🅰", g.asistencias, C.blue], ["★", g.mvp, C.gold], ["✦", g.pj > 0 ? (g.media / (g.mediaCount || g.pj)).toFixed(1) : "—", C.purple]].map(([l, v, c]) => (
+                    {[["PJ", g.pj, C.muted], ["⚽", g.goles, C.green], ["🅰", g.asistencias, C.blue], ["★", g.mvp, C.gold], ["✦", media, C.purple]].map(([l, v, c]) => (
                       <div key={l} style={{ textAlign: "center", padding: "6px 2px", background: "rgba(255,255,255,0.02)", borderRadius: 6 }}>
                         <p style={{ margin: "0 0 1px", fontSize: 13, fontWeight: 700, color: c }}>{v}</p>
                         <p style={{ margin: 0, fontSize: 8, color: C.faint }}>{l}</p>
