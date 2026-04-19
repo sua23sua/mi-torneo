@@ -243,17 +243,17 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
 
 export function TopNav({ tabs, active, onChange, color = C.gold, rightContent = null }) {
   return (
-    <nav style={{ position: "sticky", top: 0, zIndex: 200, background: "rgba(7,9,15,0.98)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", padding: "0 32px", height: 60, gap: 8 }}>
+    <nav style={{ position: "sticky", top: 0, zIndex: 200, background: "rgba(7,9,15,0.98)", backdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", padding: "0 32px", height: 60, gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 24, flexShrink: 0 }}>
         <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#e8b84b,#c9952a)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#07090f" }}>⚔</div>
         <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.gold }}>TournamentOS</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, overflowX: "auto" }}>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", background: active === t.id ? `${color}18` : "transparent", border: `1px solid ${active === t.id ? `${color}40` : "transparent"}`, borderRadius: 9, color: active === t.id ? color : C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, whiteSpace: "nowrap", flexShrink: 0, position: "relative" }}>
+          <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", background: active === t.id ? `${color}18` : "transparent", border: `1px solid ${active === t.id ? `${color}40` : "transparent"}`, borderRadius: 9, color: active === t.id ? color : C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, whiteSpace: "nowrap", flexShrink: 0 }}>
             <span style={{ fontSize: 16 }}>{t.icon}</span>
             <span>{t.label}</span>
-            {t.badge > 0 && <span style={{ fontSize: 9, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 6px", fontFamily: "sans-serif", minWidth: 16, textAlign: "center" }}>{t.badge}</span>}
+            {t.badge > 0 && <span style={{ fontSize: 9, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 6px", minWidth: 16, textAlign: "center" }}>{t.badge}</span>}
           </button>
         ))}
       </div>
@@ -267,7 +267,19 @@ export function ResponsiveNav({ tabs, active, onChange, color = C.gold, rightCon
   if (isMobile) return <BottomNav tabs={tabs} active={active} onChange={onChange} color={color} />;
   return <TopNav tabs={tabs} active={active} onChange={onChange} color={color} rightContent={rightContent} />;
 }
-
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState(() => typeof window !== "undefined" ? window.innerWidth < 768 : true);
+  React.useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, []);
+  return isMobile;
+}
+export function TopNav({ tabs, active, onChange, color = "#e8b84b", rightContent = null }) {
+  return <nav style={{ position: "sticky", top: 0, zIndex: 200, background: "rgba(7,9,15,0.98)", backdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", padding: "0 32px", height: 60, gap: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 24 }}><div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#e8b84b,#c9952a)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#07090f" }}>⚔</div><span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: "#e8b84b" }}>TournamentOS</span></div><div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>{tabs.map(t => <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", background: active === t.id ? `${color}18` : "transparent", border: `1px solid ${active === t.id ? `${color}40` : "transparent"}`, borderRadius: 9, color: active === t.id ? color : "#5a6880", cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, whiteSpace: "nowrap" }}><span style={{ fontSize: 16 }}>{t.icon}</span><span>{t.label}</span>{t.badge > 0 && <span style={{ fontSize: 9, background: "#f76f6f", color: "#fff", borderRadius: 10, padding: "1px 6px" }}>{t.badge}</span>}</button>)}</div>{rightContent && <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{rightContent}</div>}</nav>;
+}
+export function ResponsiveNav({ tabs, active, onChange, color = "#e8b84b", rightContent = null }) {
+  const isMobile = useIsMobile();
+  if (isMobile) return <BottomNav tabs={tabs} active={active} onChange={onChange} color={color} />;
+  return <TopNav tabs={tabs} active={active} onChange={onChange} color={color} rightContent={rightContent} />;
+}
 export const S = {
   wrap: { minHeight: "100dvh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
   topBar: { padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 54, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.05)", position: "sticky", top: 0, zIndex: 100 },
@@ -300,4 +312,3 @@ export const S = {
   pageTitle: { fontSize: 24, fontWeight: 700, margin: "0 0 4px" },
   pageSubtitle: { fontSize: 14, color: C.muted, margin: "0 0 20px" },
 };
-"// test" 
