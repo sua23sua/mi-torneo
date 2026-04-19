@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { C, S, statusColor, getRoundName, TeamLogo, BottomNav, formatDatetime, isTournamentActive, TOURNAMENT_TYPES } from "../shared.jsx";
+import { C, S, statusColor, getRoundName, TeamLogo, ResponsiveNav, formatDatetime, isTournamentActive, TOURNAMENT_TYPES } from "../shared.jsx";
 import MatchesPanel from "./MatchesPanel.jsx";
 import RankingPanel from "./RankingPanel.jsx";
 import { NormativaView } from "./NormativaPanel.jsx";
@@ -144,7 +144,7 @@ export default function PublicPage({ onLogin }) {
         <button onClick={onLogin} style={{ ...S.btnInline(C.gold), padding: "9px 16px", fontSize: 11 }}>Entrar →</button>
       </header>
 
-      <main style={S.main}>
+      <main style={S.main(true)}>
 
         {tab === "torneos" && (
           <>
@@ -239,7 +239,7 @@ export default function PublicPage({ onLogin }) {
 
       </main>
 
-      <BottomNav tabs={TABS} active={tab} onChange={setTab} color={C.gold} />
+      <ResponsiveNav tabs={TABS} active={tab} onChange={setTab} color={C.gold} />
     </div>
   );
 }
