@@ -13,11 +13,18 @@ export const matchStatusColor = {
   pendiente: "#5a6880", parcial: "#f7934f", conflicto: "#f76f6f", validado: "#52d68a",
 };
 
-// ── Tournament types ──────────────────────────────────────────────
 export const TOURNAMENT_TYPES = {
   rapido:  { id: "rapido",  label: "Torneo rápido",         icon: "🏃", kBase: 16, color: "#52d68a", desc: "Un día o fin de semana" },
-  semanal: { id: "semanal", label: "Torneo semanal",        icon: "🌟", kBase: 24, color: "#4f8ef7", desc: "Duración de una semana, más especial" },
+  semanal: { id: "semanal", label: "Torneo semanal",        icon: "🌟", kBase: 24, color: "#4f8ef7", desc: "Duración de una semana" },
   liga:    { id: "liga",    label: "Liga / Copa temporada", icon: "🏆", kBase: 40, color: "#e8b84b", desc: "Varias jornadas, máximo peso" },
+};
+
+export const FORMATS = {
+  Liga:               { label: "Liga",                icon: "🏆" },
+  Eliminatoria:       { label: "Eliminatoria",        icon: "⚔" },
+  "Grupos + Eliminatoria": { label: "Grupos + Elim.", icon: "🎯" },
+  Suizo:              { label: "Torneo Suizo",        icon: "🔄" },
+  "Liga Divisiones":  { label: "Liga Divisiones",    icon: "🏛" },
 };
 
 // ── ELO ──────────────────────────────────────────────────────────
@@ -120,6 +127,58 @@ export function buildGroups(teams, groupCount, legs = 1) {
   return groups;
 }
 
+// ── Swiss tournament builder ──────────────────────────────────────
+// Creates a single group with swissRounds matchdays (1 vuelta, no repeat)
+export function buildSwissGroup(teams, swissRounds) {
+  const shuffled = shuffle(teams);
+  const allDays = roundRobinMatchdays(shuffled);
+  // Take only swissRounds jornadas
+  const usedDays = allDays.slice(0, Math.min(swissRounds, allDays.length));
+  const matches = [];
+  usedDays.forEach((day, di) => {
+    day.forEach(({ teamA, teamB }) => matches.push(makeMatch(teamA, teamB, 1, di + 1)));
+  });
+  return {
+    name: "Único",
+    teams: shuffled,
+    matches,
+    standings: shuffled.map(t => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 })),
+    totalMatchdays: usedDays.length,
+    isSwiss: true,
+  };
+}
+
+// ── Swiss cups builder ────────────────────────────────────────────
+// Called after swiss group phase ends. Splits standings into cups.
+// cupSize: 4 or 8. Names: Oro, Plata, Bronce (and Cobre if needed)
+export function buildSwissCups(standings, cupSize) {
+  const cupNames = ["Oro", "Plata", "Bronce", "Cobre"];
+  const cupColors = [C.gold, "#94a3b8", "#b87333", C.muted];
+  const cups = [];
+  for (let i = 0; i < standings.length; i += cupSize) {
+    const slice = standings.slice(i, i + cupSize).map(s => s.name);
+    if (slice.length < 2) break;
+    const cupIdx = Math.floor(i / cupSize);
+    cups.push({
+      name: cupNames[cupIdx] || `Copa ${cupIdx + 1}`,
+      color: cupColors[cupIdx] || C.muted,
+      startPos: i + 1,
+      endPos: Math.min(i + cupSize, standings.length),
+      rounds: [{ round: 1, matches: buildEliminationRound(slice) }],
+      winner: null,
+    });
+  }
+  return cups;
+}
+
+// ── Division league builder ───────────────────────────────────────
+export function buildDivision(divisionData, legs = 1) {
+  const { name, teams, groupCount } = divisionData;
+  const gc = Math.min(parseInt(groupCount) || 1, Math.floor(teams.length / 2));
+  const groups = buildGroups(teams, gc, legs);
+  return { name, teams, groups, legs };
+}
+
 export function applyGroupResult(standings, teamA, teamB, scoreA, scoreB) {
   return standings.map((s) => {
     if (s.name !== teamA && s.name !== teamB) return s;
@@ -169,9 +228,7 @@ export function computeMatchStatus(match, side, scoreA, scoreB) {
 // ── UI Components ─────────────────────────────────────────────────
 export function TeamLogo({ name, logoUrl, size = 28 }) {
   if (!name) return null;
-  if (logoUrl) {
-    return <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }} onError={e => { e.target.style.display = "none"; }} />;
-  }
+  if (logoUrl) return <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }} onError={e => { e.target.style.display = "none"; }} />;
   const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0, background: `hsl(${hue},45%,28%)`, border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.max(size * 0.38, 10), fontWeight: 700, color: "#e8edf4", fontFamily: "'Georgia',serif" }}>{name.charAt(0).toUpperCase()}</div>;
 }
@@ -184,34 +241,12 @@ export function EloBar({ elo }) {
 
 export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   return (
-    <nav style={{
-      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
-      background: "rgba(7,9,15,0.97)",
-      backdropFilter: "blur(20px)",
-      WebkitBackdropFilter: "blur(20px)",
-      borderTop: "1px solid rgba(255,255,255,0.06)",
-      display: "flex", alignItems: "stretch",
-      // Home indicator safe area
-      paddingBottom: "env(safe-area-inset-bottom, 0px)",
-    }}>
+    <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "stretch", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
       {tabs.map(t => (
-        <button key={t.id} onClick={() => onChange(t.id)} style={{
-          flex: 1, display: "flex", flexDirection: "column",
-          alignItems: "center", justifyContent: "center",
-          gap: 3, padding: "10px 2px 10px",
-          background: "none", border: "none", cursor: "pointer",
-          color: active === t.id ? color : C.muted,
-          fontFamily: "'Georgia',serif", transition: "color .15s",
-          minWidth: 0, position: "relative",
-          // 44pt minimum touch target
-          minHeight: 44,
-          WebkitTapHighlightColor: "transparent",
-        }}>
+        <button key={t.id} onClick={() => onChange(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "10px 2px 10px", background: "none", border: "none", cursor: "pointer", color: active === t.id ? color : C.muted, fontFamily: "'Georgia',serif", transition: "color .15s", minWidth: 0, position: "relative", minHeight: 44, WebkitTapHighlightColor: "transparent" }}>
           <span style={{ fontSize: 20, lineHeight: 1 }}>{t.icon}</span>
           <span style={{ fontSize: 9, letterSpacing: 0.4, textTransform: "uppercase", lineHeight: 1, whiteSpace: "nowrap" }}>{t.label}</span>
-          {t.badge > 0 && (
-            <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>
-          )}
+          {t.badge > 0 && <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>}
         </button>
       ))}
     </nav>
@@ -219,112 +254,22 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
 }
 
 export const S = {
-  wrap: {
-    minHeight: "100dvh", // dynamic viewport — Safari toolbar aware
-    background: C.bg,
-    fontFamily: "'Georgia','Times New Roman',serif",
-    color: C.text,
-  },
-
-  // Top bar — sits below Dynamic Island via padding-top in body
-  topBar: {
-    padding: "0 16px",
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    // 54px content + safe area inset handled by body padding-top
-    height: 54,
-    background: "rgba(7,9,15,0.97)",
-    backdropFilter: "blur(16px)",
-    WebkitBackdropFilter: "blur(16px)",
-    borderBottom: "1px solid rgba(255,255,255,0.05)",
-    position: "sticky", top: 0, zIndex: 100,
-  },
-
-  // Main content — bottom padding accounts for nav + home indicator
-  main: {
-    maxWidth: 390, // iPhone 17 logical width
-    margin: "0 auto",
-    padding: "20px 16px",
-    // Bottom: nav height (64px) + safe area bottom (up to 34pt on iPhone 17)
-    paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
-  },
-
-  card: {
-    border: "1px solid rgba(255,255,255,0.06)",
-    background: C.card, borderRadius: 16, // slightly larger radius for modern iOS feel
-    padding: 16, marginBottom: 10,
-  },
+  wrap: { minHeight: "100dvh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
+  topBar: { padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 54, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.05)", position: "sticky", top: 0, zIndex: 100 },
+  main: { maxWidth: 390, margin: "0 auto", padding: "20px 16px", paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))" },
+  card: { border: "1px solid rgba(255,255,255,0.06)", background: C.card, borderRadius: 16, padding: 16, marginBottom: 10 },
   label: { fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
-  input: {
-    width: "100%", padding: "14px", fontSize: 16, // 16px prevents iOS auto-zoom
-    borderRadius: 12, background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.09)", color: C.text,
-    boxSizing: "border-box", fontFamily: "'Georgia',serif",
-    WebkitAppearance: "none", appearance: "none",
-    // 44pt touch target
-    minHeight: 44,
-  },
-  textarea: {
-    width: "100%", padding: "14px", fontSize: 16,
-    borderRadius: 12, background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.09)", color: C.text,
-    boxSizing: "border-box", fontFamily: "'Georgia',serif",
-    minHeight: 110, resize: "vertical",
-    WebkitAppearance: "none", appearance: "none",
-  },
-  select: {
-    width: "100%", padding: "14px", fontSize: 16,
-    borderRadius: 12, background: "#0d1117",
-    border: "1px solid rgba(255,255,255,0.09)", color: C.text,
-    fontFamily: "'Georgia',serif",
-    WebkitAppearance: "none", appearance: "none",
-    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a6880' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")",
-    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center", paddingRight: 36,
-    minHeight: 44,
-  },
-  btn: (color = "#4f8ef7") => ({
-    padding: "15px 20px", background: color, border: "none", borderRadius: 12,
-    color: color === "#e8b84b" ? "#07090f" : "#fff",
-    cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
-    fontSize: 14, fontWeight: 700, fontFamily: "'Georgia',serif",
-    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
-    width: "100%", minHeight: 52, // generous touch target
-    WebkitAppearance: "none",
-  }),
-  btnInline: (color = "#4f8ef7") => ({
-    padding: "11px 18px", background: color, border: "none", borderRadius: 10,
-    color: color === "#e8b84b" ? "#07090f" : "#fff",
-    cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
-    fontSize: 12, fontWeight: 700, fontFamily: "'Georgia',serif",
-    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
-    flexShrink: 0, minHeight: 44,
-  }),
-  btnSm: {
-    padding: "9px 14px", background: "transparent", borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.13)", color: C.muted,
-    cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
-    fontFamily: "'Georgia',serif", whiteSpace: "nowrap",
-    WebkitTapHighlightColor: "transparent", flexShrink: 0, minHeight: 44,
-  },
-  btnDanger: {
-    padding: "9px 14px", background: "transparent", borderRadius: 10,
-    border: "1px solid rgba(247,111,111,0.3)", color: "#f76f6f",
-    cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
-    fontFamily: "'Georgia',serif", WebkitTapHighlightColor: "transparent",
-    minHeight: 44,
-  },
-  tag: (color) => ({
-    fontSize: 9, letterSpacing: 1.5, padding: "4px 10px", borderRadius: 20,
-    background: `${color}1a`, color, border: `1px solid ${color}40`,
-    textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap",
-  }),
+  input: { width: "100%", padding: "14px", fontSize: 16, borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif", WebkitAppearance: "none", appearance: "none", minHeight: 44 },
+  textarea: { width: "100%", padding: "14px", fontSize: 16, borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif", minHeight: 110, resize: "vertical", WebkitAppearance: "none" },
+  select: { width: "100%", padding: "14px", fontSize: 16, borderRadius: 12, background: "#0d1117", border: "1px solid rgba(255,255,255,0.09)", color: C.text, fontFamily: "'Georgia',serif", WebkitAppearance: "none", appearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a6880' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center", paddingRight: 36, minHeight: 44 },
+  btn: (color = "#4f8ef7") => ({ padding: "15px 20px", background: color, border: "none", borderRadius: 12, color: color === "#e8b84b" ? "#07090f" : "#fff", cursor: "pointer", letterSpacing: 1, textTransform: "uppercase", fontSize: 14, fontWeight: 700, fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", width: "100%", minHeight: 52 }),
+  btnInline: (color = "#4f8ef7") => ({ padding: "11px 18px", background: color, border: "none", borderRadius: 10, color: color === "#e8b84b" ? "#07090f" : "#fff", cursor: "pointer", letterSpacing: 1, textTransform: "uppercase", fontSize: 12, fontWeight: 700, fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", flexShrink: 0, minHeight: 44 }),
+  btnSm: { padding: "9px 14px", background: "transparent", borderRadius: 10, border: "1px solid rgba(255,255,255,0.13)", color: C.muted, cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", flexShrink: 0, minHeight: 44 },
+  btnDanger: { padding: "9px 14px", background: "transparent", borderRadius: 10, border: "1px solid rgba(247,111,111,0.3)", color: "#f76f6f", cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'Georgia',serif", WebkitTapHighlightColor: "transparent", minHeight: 44 },
+  tag: (color) => ({ fontSize: 9, letterSpacing: 1.5, padding: "4px 10px", borderRadius: 20, background: `${color}1a`, color, border: `1px solid ${color}40`, textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap" }),
   th: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted, padding: "10px 8px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)" },
   td: { padding: "11px 8px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
-  numInput: {
-    width: 52, padding: "10px 4px", textAlign: "center", borderRadius: 10,
-    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-    color: C.text, fontFamily: "'Georgia',serif", fontSize: 20,
-    WebkitAppearance: "none", appearance: "none", minHeight: 44,
-  },
+  numInput: { width: 52, padding: "10px 4px", textAlign: "center", borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: C.text, fontFamily: "'Georgia',serif", fontSize: 20, WebkitAppearance: "none", appearance: "none", minHeight: 44 },
   sectionTitle: { fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.blue, margin: "0 0 14px" },
   pageTitle: { fontSize: 24, fontWeight: 700, margin: "0 0 4px" },
   pageSubtitle: { fontSize: 14, color: C.muted, margin: "0 0 20px" },
