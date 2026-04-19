@@ -1,13 +1,207 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>mi-torneo</title>
+
+    <!-- iPhone 17: viewport-fit=cover para safe areas con Dynamic Island -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+
+    <!-- PWA / standalone -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TournamentOS" />
+    <meta name="theme-color" content="#07090f" />
+
+    <!-- Prevent tap highlight on iOS -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <title>TournamentOS</title>
+
+    <style>
+      /* ── Reset & base ─────────────────────────────────────── */
+      *, *::before, *::after {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+      }
+
+      html {
+        /* Prevent font size inflation on orientation change */
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+        /* Smooth scroll */
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: #07090f;
+        color: #edf0f7;
+        font-family: 'Georgia', 'Times New Roman', serif;
+
+        /* Full bleed under Dynamic Island and home indicator */
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        padding-left: env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
+
+        /* Prevent overscroll bounce revealing background */
+        overscroll-behavior-y: contain;
+        overscroll-behavior-x: none;
+
+        /* Smooth momentum scrolling on iOS */
+        -webkit-overflow-scrolling: touch;
+
+        /* Prevent text selection on UI elements */
+        -webkit-user-select: none;
+        user-select: none;
+
+        min-height: 100dvh; /* dynamic viewport height — accounts for Safari toolbar */
+      }
+
+      /* Allow text selection in inputs and content areas */
+      input, textarea, p, h1, h2, h3, h4, span.selectable {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
+      #root {
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── Typography — optimized for 460 PPI @3x ──────────── */
+      /* Base 16px renders as ~5.3px physical — perfectly sharp at 460 PPI */
+
+      /* ── Scrollbars — hidden on mobile ───────────────────── */
+      ::-webkit-scrollbar { display: none; }
+      * { scrollbar-width: none; }
+
+      /* ── Inputs — prevent iOS zoom on focus (min 16px) ───── */
+      input, select, textarea {
+        font-size: 16px !important; /* iOS zooms if font-size < 16px */
+        border-radius: 10px;
+      }
+
+      /* ── Buttons — 44pt minimum touch target (Apple HIG) ─── */
+      button {
+        min-height: 44px;
+        cursor: pointer;
+      }
+
+      /* ── Tables ───────────────────────────────────────────── */
+      table { border-collapse: collapse; width: 100%; }
+
+      /* ── Animations — respect prefers-reduced-motion ──────── */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      /* ── Safe area helpers for sticky elements ────────────── */
+      .safe-top    { padding-top:    env(safe-area-inset-top,    0px); }
+      .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+      /* ── Sticky top bar — accounts for Dynamic Island ─────── */
+      .topbar-safe {
+        padding-top: max(12px, env(safe-area-inset-top, 12px));
+      }
+
+      /* ── Bottom nav — accounts for home indicator ─────────── */
+      .bottomnav-safe {
+        padding-bottom: max(8px, env(safe-area-inset-bottom, 8px));
+      }
+
+      /* ── Prevent horizontal overflow ──────────────────────── */
+      body, #root {
+        overflow-x: hidden;
+        max-width: 100vw;
+      }
+
+      /* ── iOS datetime input color scheme ──────────────────── */
+      input[type="date"],
+      input[type="datetime-local"],
+      input[type="time"] {
+        color-scheme: dark;
+      }
+
+      /* ── Focus ring — keyboard navigation ─────────────────── */
+      :focus-visible {
+        outline: 2px solid #4f8ef7;
+        outline-offset: 2px;
+      }
+      :focus:not(:focus-visible) {
+        outline: none;
+      }
+
+      /* ── Image rendering ───────────────────────────────────── */
+      img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      /* ── Loading state ─────────────────────────────────────── */
+      #loading {
+        position: fixed;
+        inset: 0;
+        background: #07090f;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        flex-direction: column;
+        gap: 16px;
+      }
+      #loading-icon {
+        width: 48px;
+        height: 48px;
+        background: linear-gradient(135deg, #e8b84b, #c9952a);
+        border-radius: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+      }
+      #loading-text {
+        font-family: 'Georgia', serif;
+        font-size: 11px;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        color: #4f8ef7;
+      }
+    </style>
   </head>
   <body>
+    <!-- Shown until React hydrates -->
+    <div id="loading">
+      <div id="loading-icon">⚔</div>
+      <div id="loading-text">TournamentOS</div>
+    </div>
+
     <div id="root"></div>
+
+    <script>
+      // Hide loading screen once React mounts
+      document.addEventListener('DOMContentLoaded', () => {
+        const observer = new MutationObserver(() => {
+          const root = document.getElementById('root');
+          if (root && root.children.length > 0) {
+            const loading = document.getElementById('loading');
+            if (loading) loading.style.display = 'none';
+            observer.disconnect();
+          }
+        });
+        observer.observe(document.getElementById('root'), { childList: true });
+      });
+    </script>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

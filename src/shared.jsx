@@ -63,9 +63,8 @@ export function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); 
 
 export function formatDatetime(iso) {
   if (!iso) return null;
-  try {
-    return new Date(iso).toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-  } catch { return iso; }
+  try { return new Date(iso).toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+  catch { return iso; }
 }
 
 export function isTournamentActive(t) {
@@ -171,36 +170,45 @@ export function computeMatchStatus(match, side, scoreA, scoreB) {
 export function TeamLogo({ name, logoUrl, size = 28 }) {
   if (!name) return null;
   if (logoUrl) {
-    return (
-      <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }}
-        onError={e => { e.target.style.display = "none"; }} />
-    );
+    return <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }} onError={e => { e.target.style.display = "none"; }} />;
   }
   const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
-  return (
-    <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0, background: `hsl(${hue},45%,28%)`, border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.max(size * 0.38, 10), fontWeight: 700, color: "#e8edf4", fontFamily: "'Georgia',serif" }}>
-      {name.charAt(0).toUpperCase()}
-    </div>
-  );
+  return <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0, background: `hsl(${hue},45%,28%)`, border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.max(size * 0.38, 10), fontWeight: 700, color: "#e8edf4", fontFamily: "'Georgia',serif" }}>{name.charAt(0).toUpperCase()}</div>;
 }
 
 export function EloBar({ elo }) {
   const pct = Math.min(100, Math.max(0, ((elo - 600) / 900) * 100));
   const { color } = eloLabel(elo);
-  return (
-    <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-      <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} />
-    </div>
-  );
+  return <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} /></div>;
 }
 
 export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   return (
-    <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200, background: "rgba(10,13,20,0.98)", backdropFilter: "blur(20px)", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "stretch", paddingBottom: "env(safe-area-inset-bottom,0px)" }}>
+    <nav style={{
+      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
+      background: "rgba(7,9,15,0.97)",
+      backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
+      borderTop: "1px solid rgba(255,255,255,0.06)",
+      display: "flex", alignItems: "stretch",
+      // Home indicator safe area
+      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+    }}>
       {tabs.map(t => (
-        <button key={t.id} onClick={() => onChange(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "10px 2px 8px", background: "none", border: "none", cursor: "pointer", color: active === t.id ? color : C.muted, fontFamily: "'Georgia',serif", transition: "color .15s", minWidth: 0, position: "relative" }}>
-          <span style={{ fontSize: 19, lineHeight: 1 }}>{t.icon}</span>
-          <span style={{ fontSize: 9, letterSpacing: 0.5, textTransform: "uppercase", lineHeight: 1, whiteSpace: "nowrap" }}>{t.label}</span>
+        <button key={t.id} onClick={() => onChange(t.id)} style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: 3, padding: "10px 2px 10px",
+          background: "none", border: "none", cursor: "pointer",
+          color: active === t.id ? color : C.muted,
+          fontFamily: "'Georgia',serif", transition: "color .15s",
+          minWidth: 0, position: "relative",
+          // 44pt minimum touch target
+          minHeight: 44,
+          WebkitTapHighlightColor: "transparent",
+        }}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>{t.icon}</span>
+          <span style={{ fontSize: 9, letterSpacing: 0.4, textTransform: "uppercase", lineHeight: 1, whiteSpace: "nowrap" }}>{t.label}</span>
           {t.badge > 0 && (
             <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>
           )}
@@ -211,23 +219,113 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
 }
 
 export const S = {
-  wrap: { minHeight: "100vh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
-  topBar: { padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 54, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.05)", position: "sticky", top: 0, zIndex: 100 },
-  main: { maxWidth: 680, margin: "0 auto", padding: "20px 16px 90px" },
-  card: { border: "1px solid rgba(255,255,255,0.06)", background: C.card, borderRadius: 12, padding: 16, marginBottom: 10 },
-  label: { fontSize: 10, letterSpacing: 2.5, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
-  input: { width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif", WebkitAppearance: "none" },
-  textarea: { width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif", minHeight: 110, resize: "vertical", WebkitAppearance: "none" },
-  select: { width: "100%", padding: "13px 14px", fontSize: 16, borderRadius: 10, background: "#0d1117", border: "1px solid rgba(255,255,255,0.09)", color: C.text, fontFamily: "'Georgia',serif", WebkitAppearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a6880' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center", paddingRight: 36 },
-  btn: (color = "#4f8ef7") => ({ padding: "14px 20px", background: color, border: "none", borderRadius: 10, color: color === "#e8b84b" ? "#07090f" : "#fff", cursor: "pointer", letterSpacing: 1, textTransform: "uppercase", fontSize: 13, fontWeight: 700, fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", width: "100%" }),
-  btnInline: (color = "#4f8ef7") => ({ padding: "10px 18px", background: color, border: "none", borderRadius: 8, color: color === "#e8b84b" ? "#07090f" : "#fff", cursor: "pointer", letterSpacing: 1, textTransform: "uppercase", fontSize: 11, fontWeight: 700, fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", flexShrink: 0 }),
-  btnSm: { padding: "8px 14px", background: "transparent", borderRadius: 8, border: "1px solid rgba(255,255,255,0.13)", color: C.muted, cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'Georgia',serif", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent", flexShrink: 0 },
-  btnDanger: { padding: "8px 14px", background: "transparent", borderRadius: 8, border: "1px solid rgba(247,111,111,0.3)", color: "#f76f6f", cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'Georgia',serif", WebkitTapHighlightColor: "transparent" },
-  tag: (color) => ({ fontSize: 9, letterSpacing: 1.5, padding: "3px 9px", borderRadius: 20, background: `${color}1a`, color, border: `1px solid ${color}40`, textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap" }),
-  th: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted, padding: "9px 8px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)" },
-  td: { padding: "10px 8px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
-  numInput: { width: 52, padding: "10px 4px", textAlign: "center", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: C.text, fontFamily: "'Georgia',serif", fontSize: 18, WebkitAppearance: "none" },
+  wrap: {
+    minHeight: "100dvh", // dynamic viewport — Safari toolbar aware
+    background: C.bg,
+    fontFamily: "'Georgia','Times New Roman',serif",
+    color: C.text,
+  },
+
+  // Top bar — sits below Dynamic Island via padding-top in body
+  topBar: {
+    padding: "0 16px",
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    // 54px content + safe area inset handled by body padding-top
+    height: 54,
+    background: "rgba(7,9,15,0.97)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+    position: "sticky", top: 0, zIndex: 100,
+  },
+
+  // Main content — bottom padding accounts for nav + home indicator
+  main: {
+    maxWidth: 390, // iPhone 17 logical width
+    margin: "0 auto",
+    padding: "20px 16px",
+    // Bottom: nav height (64px) + safe area bottom (up to 34pt on iPhone 17)
+    paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+  },
+
+  card: {
+    border: "1px solid rgba(255,255,255,0.06)",
+    background: C.card, borderRadius: 16, // slightly larger radius for modern iOS feel
+    padding: 16, marginBottom: 10,
+  },
+  label: { fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
+  input: {
+    width: "100%", padding: "14px", fontSize: 16, // 16px prevents iOS auto-zoom
+    borderRadius: 12, background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.09)", color: C.text,
+    boxSizing: "border-box", fontFamily: "'Georgia',serif",
+    WebkitAppearance: "none", appearance: "none",
+    // 44pt touch target
+    minHeight: 44,
+  },
+  textarea: {
+    width: "100%", padding: "14px", fontSize: 16,
+    borderRadius: 12, background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.09)", color: C.text,
+    boxSizing: "border-box", fontFamily: "'Georgia',serif",
+    minHeight: 110, resize: "vertical",
+    WebkitAppearance: "none", appearance: "none",
+  },
+  select: {
+    width: "100%", padding: "14px", fontSize: 16,
+    borderRadius: 12, background: "#0d1117",
+    border: "1px solid rgba(255,255,255,0.09)", color: C.text,
+    fontFamily: "'Georgia',serif",
+    WebkitAppearance: "none", appearance: "none",
+    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a6880' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")",
+    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center", paddingRight: 36,
+    minHeight: 44,
+  },
+  btn: (color = "#4f8ef7") => ({
+    padding: "15px 20px", background: color, border: "none", borderRadius: 12,
+    color: color === "#e8b84b" ? "#07090f" : "#fff",
+    cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
+    fontSize: 14, fontWeight: 700, fontFamily: "'Georgia',serif",
+    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
+    width: "100%", minHeight: 52, // generous touch target
+    WebkitAppearance: "none",
+  }),
+  btnInline: (color = "#4f8ef7") => ({
+    padding: "11px 18px", background: color, border: "none", borderRadius: 10,
+    color: color === "#e8b84b" ? "#07090f" : "#fff",
+    cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
+    fontSize: 12, fontWeight: 700, fontFamily: "'Georgia',serif",
+    whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent",
+    flexShrink: 0, minHeight: 44,
+  }),
+  btnSm: {
+    padding: "9px 14px", background: "transparent", borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.13)", color: C.muted,
+    cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
+    fontFamily: "'Georgia',serif", whiteSpace: "nowrap",
+    WebkitTapHighlightColor: "transparent", flexShrink: 0, minHeight: 44,
+  },
+  btnDanger: {
+    padding: "9px 14px", background: "transparent", borderRadius: 10,
+    border: "1px solid rgba(247,111,111,0.3)", color: "#f76f6f",
+    cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
+    fontFamily: "'Georgia',serif", WebkitTapHighlightColor: "transparent",
+    minHeight: 44,
+  },
+  tag: (color) => ({
+    fontSize: 9, letterSpacing: 1.5, padding: "4px 10px", borderRadius: 20,
+    background: `${color}1a`, color, border: `1px solid ${color}40`,
+    textTransform: "uppercase", display: "inline-block", whiteSpace: "nowrap",
+  }),
+  th: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: C.muted, padding: "10px 8px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.05)" },
+  td: { padding: "11px 8px", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.03)" },
+  numInput: {
+    width: 52, padding: "10px 4px", textAlign: "center", borderRadius: 10,
+    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+    color: C.text, fontFamily: "'Georgia',serif", fontSize: 20,
+    WebkitAppearance: "none", appearance: "none", minHeight: 44,
+  },
   sectionTitle: { fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.blue, margin: "0 0 14px" },
-  pageTitle: { fontSize: 22, fontWeight: 700, margin: "0 0 4px" },
-  pageSubtitle: { fontSize: 13, color: C.muted, margin: "0 0 20px" },
+  pageTitle: { fontSize: 24, fontWeight: 700, margin: "0 0 4px" },
+  pageSubtitle: { fontSize: 14, color: C.muted, margin: "0 0 20px" },
 };
