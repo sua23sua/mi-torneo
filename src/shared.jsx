@@ -23,7 +23,7 @@ export const TOURNAMENT_TYPES = {
 
 // ── Responsive hook ───────────────────────────────────────────────
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 768 : true);
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener("resize", handler);
@@ -64,6 +64,7 @@ export function eloTierIcon(elo) {
   return { Élite: "💎", Oro: "🥇", Plata: "🥈", Bronce: "🥉", Hierro: "⚙️" }[eloLabel(elo).label] || "⚙️";
 }
 
+// ── Helpers ───────────────────────────────────────────────────────
 export function getRoundName(totalRounds, roundIdx) {
   if (totalRounds === 1) return "Final";
   const remaining = totalRounds - roundIdx;
@@ -137,7 +138,11 @@ export function buildSwissGroup(teams, swissRounds) {
   const usedDays = allDays.slice(0, Math.min(swissRounds, allDays.length));
   const matches = [];
   usedDays.forEach((day, di) => day.forEach(({ teamA, teamB }) => matches.push(makeMatch(teamA, teamB, 1, di + 1))));
-  return { name: "Único", teams: shuffled, matches, standings: shuffled.map(t => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 })), totalMatchdays: usedDays.length, isSwiss: true };
+  return {
+    name: "Único", teams: shuffled, matches,
+    standings: shuffled.map(t => ({ name: t, pts: 0, gf: 0, gc: 0, pj: 0, gd: 0 })),
+    totalMatchdays: usedDays.length, isSwiss: true,
+  };
 }
 
 export function buildSwissCups(standings, cupSize) {
@@ -148,7 +153,13 @@ export function buildSwissCups(standings, cupSize) {
     const slice = standings.slice(i, i + cupSize).map(s => s.name);
     if (slice.length < 2) break;
     const cupIdx = Math.floor(i / cupSize);
-    cups.push({ name: cupNames[cupIdx] || `Copa ${cupIdx + 1}`, color: cupColors[cupIdx] || C.muted, startPos: i + 1, endPos: Math.min(i + cupSize, standings.length), rounds: [{ round: 1, matches: buildEliminationRound(slice) }], winner: null });
+    cups.push({
+      name: cupNames[cupIdx] || `Copa ${cupIdx + 1}`,
+      color: cupColors[cupIdx] || C.muted,
+      startPos: i + 1, endPos: Math.min(i + cupSize, standings.length),
+      rounds: [{ round: 1, matches: buildEliminationRound(slice) }],
+      winner: null,
+    });
   }
   return cups;
 }
@@ -156,8 +167,7 @@ export function buildSwissCups(standings, cupSize) {
 export function buildDivision(divisionData, legs = 1) {
   const { name, teams, groupCount } = divisionData;
   const gc = Math.min(parseInt(groupCount) || 1, Math.floor(teams.length / 2));
-  const groups = buildGroups(teams, gc, legs);
-  return { name, teams, groups, legs };
+  return { name, teams, groups: buildGroups(teams, gc, legs), legs };
 }
 
 export function applyGroupResult(standings, teamA, teamB, scoreA, scoreB) {
@@ -220,18 +230,12 @@ export function EloBar({ elo }) {
   return <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} /></div>;
 }
 
-// ── BottomNav — mobile only (hidden on PC via CSS) ────────────────
+// ── Mobile bottom nav ─────────────────────────────────────────────
 export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   return (
-    <nav className="bottom-nav-mobile" style={{
-      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
-      background: "rgba(7,9,15,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-      borderTop: "1px solid rgba(255,255,255,0.06)",
-      alignItems: "stretch",
-      paddingBottom: "env(safe-area-inset-bottom, 0px)",
-    }}>
+    <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "stretch", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
       {tabs.map(t => (
-        <button key={t.id} onClick={() => onChange(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "10px 2px", background: "none", border: "none", cursor: "pointer", color: active === t.id ? color : C.muted, fontFamily: "'Georgia',serif", minWidth: 0, position: "relative", minHeight: 44, WebkitTapHighlightColor: "transparent" }}>
+        <button key={t.id} onClick={() => onChange(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "10px 2px", background: "none", border: "none", cursor: "pointer", color: active === t.id ? color : C.muted, fontFamily: "'Georgia',serif", transition: "color .15s", minWidth: 0, position: "relative", minHeight: 44, WebkitTapHighlightColor: "transparent" }}>
           <span style={{ fontSize: 20, lineHeight: 1 }}>{t.icon}</span>
           <span style={{ fontSize: 9, letterSpacing: 0.4, textTransform: "uppercase", lineHeight: 1, whiteSpace: "nowrap" }}>{t.label}</span>
           {t.badge > 0 && <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", fontSize: 8, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 5px", fontFamily: "sans-serif", minWidth: 14, textAlign: "center" }}>{t.badge}</span>}
@@ -241,76 +245,55 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   );
 }
 
-// ── TopNav — PC only (hidden on mobile via CSS) ───────────────────
-export function TopNav({ tabs, active, onChange, color = C.gold, rightSlot }) {
+// ── PC top nav ────────────────────────────────────────────────────
+export function TopNav({ tabs, active, onChange, color = C.gold, rightContent = null }) {
   return (
-    <nav className="top-nav-pc" style={{
-      position: "sticky", top: 0, zIndex: 200,
-      background: "rgba(7,9,15,0.98)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-      borderBottom: "1px solid rgba(255,255,255,0.06)",
-      alignItems: "center",
-      padding: "0 32px",
-      height: 60,
-      gap: 4,
-    }}>
-      {/* Logo */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 32, flexShrink: 0 }}>
+    <nav style={{ position: "sticky", top: 0, zIndex: 200, background: "rgba(7,9,15,0.98)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", padding: "0 32px", height: 60, gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 24, flexShrink: 0 }}>
         <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#e8b84b,#c9952a)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#07090f" }}>⚔</div>
         <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: C.gold }}>TournamentOS</span>
       </div>
-
-      {/* Nav items */}
-      <div style={{ display: "flex", gap: 4, flex: 1, alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, overflowX: "auto" }}>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 8, border: "none", background: active === t.id ? `${color}18` : "transparent", color: active === t.id ? color : C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, whiteSpace: "nowrap", position: "relative", transition: "all .15s", WebkitTapHighlightColor: "transparent", minHeight: 36 }}>
+          <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", background: active === t.id ? `${color}18` : "transparent", border: `1px solid ${active === t.id ? `${color}40` : "transparent"}`, borderRadius: 9, color: active === t.id ? color : C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, transition: "all .15s", position: "relative", whiteSpace: "nowrap", flexShrink: 0 }}>
             <span style={{ fontSize: 16 }}>{t.icon}</span>
             <span>{t.label}</span>
             {t.badge > 0 && <span style={{ fontSize: 9, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 6px", fontFamily: "sans-serif", minWidth: 16, textAlign: "center" }}>{t.badge}</span>}
           </button>
         ))}
       </div>
-
-      {/* Right slot: user info / logout */}
-      {rightSlot && <div style={{ flexShrink: 0, marginLeft: 16 }}>{rightSlot}</div>}
+      {rightContent && <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>{rightContent}</div>}
     </nav>
   );
 }
 
-// ── Responsive styles ─────────────────────────────────────────────
+// ── Auto-switching nav ────────────────────────────────────────────
+export function ResponsiveNav({ tabs, active, onChange, color = C.gold, rightContent = null }) {
+  const isMobile = useIsMobile();
+  if (isMobile) return <BottomNav tabs={tabs} active={active} onChange={onChange} color={color} />;
+  return <TopNav tabs={tabs} active={active} onChange={onChange} color={color} rightContent={rightContent} />;
+}
+
+// ── Styles ────────────────────────────────────────────────────────
 export const S = {
-  wrap: {
-    minHeight: "100dvh",
-    background: C.bg,
-    fontFamily: "'Georgia','Times New Roman',serif",
-    color: C.text,
-  },
+  wrap: { minHeight: "100dvh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
+  topBar: { padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 54, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.05)", position: "sticky", top: 0, zIndex: 100 },
 
-  // Top bar — only used on mobile (replaced by TopNav on PC)
-  topBar: {
-    padding: "0 16px",
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    height: 54,
-    background: "rgba(7,9,15,0.97)",
-    backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
-    borderBottom: "1px solid rgba(255,255,255,0.05)",
-    position: "sticky", top: 0, zIndex: 100,
-  },
+  // Responsive main — call as S.main(isMobile)
+  main: (isMobile = true) => ({
+    maxWidth: isMobile ? 390 : 960,
+    margin: "0 auto",
+    padding: isMobile ? "20px 16px" : "28px 32px",
+    paddingBottom: isMobile ? "calc(80px + env(safe-area-inset-bottom, 0px))" : "40px",
+  }),
 
-  // Main content — responsive width
-  // On mobile: 390px max, bottom padding for nav
-  // On PC: wider, no bottom padding for nav (TopNav is at top)
-  get main() {
-    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
-    return {
-      maxWidth: isMobile ? 390 : 1100,
-      margin: "0 auto",
-      padding: isMobile ? "20px 16px" : "32px 40px",
-      paddingBottom: isMobile
-        ? "calc(80px + env(safe-area-inset-bottom, 0px))"
-        : "40px",
-      width: "100%",
-    };
-  },
+  // 2-col grid on PC
+  grid: (isMobile = true) => ({
+    display: isMobile ? "block" : "grid",
+    gridTemplateColumns: isMobile ? undefined : "1fr 1fr",
+    gap: isMobile ? undefined : 20,
+    alignItems: "start",
+  }),
 
   card: { border: "1px solid rgba(255,255,255,0.06)", background: C.card, borderRadius: 16, padding: 16, marginBottom: 10 },
   label: { fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
