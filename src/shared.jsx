@@ -21,9 +21,10 @@ export const TOURNAMENT_TYPES = {
   liga:    { id: "liga",    label: "Liga / Copa temporada", icon: "🏆", kBase: 40, color: "#e8b84b", desc: "Varias jornadas, máximo peso" },
 };
 
-// ── Responsive hook ───────────────────────────────────────────────
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 768 : true);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 768 : true
+  );
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener("resize", handler);
@@ -32,7 +33,6 @@ export function useIsMobile() {
   return isMobile;
 }
 
-// ── ELO ──────────────────────────────────────────────────────────
 export const ELO_DEFAULT = 1000;
 export const ELO_PROVISIONAL_GAMES = 10;
 
@@ -64,7 +64,6 @@ export function eloTierIcon(elo) {
   return { Élite: "💎", Oro: "🥇", Plata: "🥈", Bronce: "🥉", Hierro: "⚙️" }[eloLabel(elo).label] || "⚙️";
 }
 
-// ── Helpers ───────────────────────────────────────────────────────
 export function getRoundName(totalRounds, roundIdx) {
   if (totalRounds === 1) return "Final";
   const remaining = totalRounds - roundIdx;
@@ -88,7 +87,6 @@ export function isTournamentActive(t) {
   return false;
 }
 
-// ── Match builders ────────────────────────────────────────────────
 export function makeMatch(teamA, teamB, leg = 1, matchday = 1) {
   return { teamA, teamB, leg, matchday, scoreA: null, scoreB: null, played: false, reportByA: null, reportByB: null, matchStatus: "pendiente", winner: null };
 }
@@ -216,7 +214,6 @@ export function computeMatchStatus(match, side, scoreA, scoreB) {
   return (other.scoreA === scoreA && other.scoreB === scoreB) ? "validado" : "conflicto";
 }
 
-// ── UI Components ─────────────────────────────────────────────────
 export function TeamLogo({ name, logoUrl, size = 28 }) {
   if (!name) return null;
   if (logoUrl) return <img src={logoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)", flexShrink: 0, background: "#1a2030", display: "block" }} onError={e => { e.target.style.display = "none"; }} />;
@@ -230,7 +227,6 @@ export function EloBar({ elo }) {
   return <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} /></div>;
 }
 
-// ── Mobile bottom nav ─────────────────────────────────────────────
 export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   return (
     <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "stretch", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
@@ -245,7 +241,6 @@ export function BottomNav({ tabs, active, onChange, color = C.gold }) {
   );
 }
 
-// ── PC top nav ────────────────────────────────────────────────────
 export function TopNav({ tabs, active, onChange, color = C.gold, rightContent = null }) {
   return (
     <nav style={{ position: "sticky", top: 0, zIndex: 200, background: "rgba(7,9,15,0.98)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", padding: "0 32px", height: 60, gap: 8 }}>
@@ -255,7 +250,7 @@ export function TopNav({ tabs, active, onChange, color = C.gold, rightContent = 
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, overflowX: "auto" }}>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", background: active === t.id ? `${color}18` : "transparent", border: `1px solid ${active === t.id ? `${color}40` : "transparent"}`, borderRadius: 9, color: active === t.id ? color : C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, transition: "all .15s", position: "relative", whiteSpace: "nowrap", flexShrink: 0 }}>
+          <button key={t.id} onClick={() => onChange(t.id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", background: active === t.id ? `${color}18` : "transparent", border: `1px solid ${active === t.id ? `${color}40` : "transparent"}`, borderRadius: 9, color: active === t.id ? color : C.muted, cursor: "pointer", fontFamily: "'Georgia',serif", fontSize: 13, fontWeight: active === t.id ? 700 : 400, whiteSpace: "nowrap", flexShrink: 0, position: "relative" }}>
             <span style={{ fontSize: 16 }}>{t.icon}</span>
             <span>{t.label}</span>
             {t.badge > 0 && <span style={{ fontSize: 9, background: C.red, color: "#fff", borderRadius: 10, padding: "1px 6px", fontFamily: "sans-serif", minWidth: 16, textAlign: "center" }}>{t.badge}</span>}
@@ -267,34 +262,27 @@ export function TopNav({ tabs, active, onChange, color = C.gold, rightContent = 
   );
 }
 
-// ── Auto-switching nav ────────────────────────────────────────────
 export function ResponsiveNav({ tabs, active, onChange, color = C.gold, rightContent = null }) {
   const isMobile = useIsMobile();
   if (isMobile) return <BottomNav tabs={tabs} active={active} onChange={onChange} color={color} />;
   return <TopNav tabs={tabs} active={active} onChange={onChange} color={color} rightContent={rightContent} />;
 }
 
-// ── Styles ────────────────────────────────────────────────────────
 export const S = {
   wrap: { minHeight: "100dvh", background: C.bg, fontFamily: "'Georgia','Times New Roman',serif", color: C.text },
   topBar: { padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 54, background: "rgba(7,9,15,0.97)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.05)", position: "sticky", top: 0, zIndex: 100 },
-
-  // Responsive main — call as S.main(isMobile)
   main: (isMobile = true) => ({
     maxWidth: isMobile ? 390 : 960,
     margin: "0 auto",
     padding: isMobile ? "20px 16px" : "28px 32px",
     paddingBottom: isMobile ? "calc(80px + env(safe-area-inset-bottom, 0px))" : "40px",
   }),
-
-  // 2-col grid on PC
   grid: (isMobile = true) => ({
     display: isMobile ? "block" : "grid",
     gridTemplateColumns: isMobile ? undefined : "1fr 1fr",
     gap: isMobile ? undefined : 20,
     alignItems: "start",
   }),
-
   card: { border: "1px solid rgba(255,255,255,0.06)", background: C.card, borderRadius: 16, padding: 16, marginBottom: 10 },
   label: { fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.muted, display: "block", marginBottom: 7 },
   input: { width: "100%", padding: "14px", fontSize: 16, borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: C.text, boxSizing: "border-box", fontFamily: "'Georgia',serif", WebkitAppearance: "none", appearance: "none", minHeight: 44 },
